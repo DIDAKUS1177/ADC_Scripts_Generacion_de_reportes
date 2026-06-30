@@ -1,0 +1,6 @@
+{
+  "name": "Aplicacion para subir los espesores",
+  "description": "Aplicación para subir datos de espesores a Google Sheets mediante Apps Script",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

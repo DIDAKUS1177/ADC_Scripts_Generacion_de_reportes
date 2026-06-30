@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ADEMINCOL — Gestión</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Inter', sans-serif; box-sizing: border-box; }
+    body { margin: 0; background: #f8fafc; color: #1e293b; }
+
+    .screen { display: none; }
+    .screen.active { display: flex; }
+    .view { display: none; }
+    .view.active { display: block; }
+
+    /* Sidebar */
+    #sidebar { transition: transform .2s; }
+    #sidebar.open { transform: translateX(0) !important; }
+
+    /* Inputs */
+    .inp {
+      width: 100%; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      padding: 8px 12px; font-size: 13px; outline: none;
+      transition: border-color .15s; background: #fff; color: #1e293b;
+    }
+    .inp:focus { border-color: #dc2626; }
+    .inp::placeholder { color: #94a3b8; }
+    textarea.inp { resize: vertical; min-height: 72px; }
+    select.inp {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 8px center; background-size: 16px; padding-right: 32px;
+    }
+    .field-label { display: block; font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .04em; }
+
+    /* Nav */
+    .nav-link {
+      display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px;
+      font-size: 13px; font-weight: 500; color: #64748b; cursor: pointer;
+      transition: all .15s; border: none; background: none; width: 100%; text-align: left;
+    }
+    .nav-link:hover { background: #f1f5f9; color: #334155; }
+    .nav-link.active { background: #fef2f2; color: #dc2626; font-weight: 600; }
+    .nav-link.active svg { color: #dc2626; }
+
+    /* Badges */
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .badge-admin { background: #fef2f2; color: #dc2626; }
+    .badge-super { background: #eff6ff; color: #2563eb; }
+    .badge-insp  { background: #f0fdf4; color: #16a34a; }
+    .badge-pend  { background: #fef9c3; color: #854d0e; }
+    .badge-curso { background: #dbeafe; color: #1d4ed8; }
+    .badge-comp  { background: #dcfce7; color: #15803d; }
+    .badge-canc  { background: #f1f5f9; color: #64748b; }
+
+    /* Table */
+    .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .tbl th { background: #f8fafc; padding: 10px 12px; text-align: left; font-weight: 600; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+    .tbl td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    .tbl tr:hover td { background: #fafafa; }
+    .tbl tr:last-child td { border-bottom: none; }
+
+    /* Cards & buttons */
+    .card { background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+    .stat-card { background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 18px 20px; }
+    .stat-val { font-size: 26px; font-weight: 800; line-height: 1; }
+    .stat-lbl { font-size: 11px; color: #64748b; margin-top: 3px; }
+
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s; border: none; white-space: nowrap; }
+    .btn-primary   { background: #dc2626; color: #fff; }
+    .btn-primary:hover { background: #b91c1c; }
+    .btn-secondary { background: #fff; color: #374151; border: 1.5px solid #e2e8f0; }
+    .btn-secondary:hover { background: #f8fafc; }
+    .btn-danger    { background: #fff; color: #dc2626; border: 1.5px solid #fecaca; }
+    .btn-danger:hover { background: #fef2f2; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+
+    /* Avatar */
+    .avatar { width: 34px; height: 34px; border-radius: 50%; background: #fef2f2; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 12px; font-weight: 800; color: #dc2626; letter-spacing: -.5px; }
+    .avatar-lg { width: 60px; height: 60px; font-size: 20px; font-weight: 900; }
+
+    /* Progress */
+    .prog { background: #f1f5f9; border-radius: 99px; height: 6px; overflow: hidden; }
+    .prog-bar { height: 100%; border-radius: 99px; transition: width .5s ease; }
+
+    /* Modals */
+    .modal-bd { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100; display: none; align-items: center; justify-content: center; padding: 16px; }
+    .modal-bd.show { display: flex; }
+    .modal-box { background: #fff; border-radius: 16px; box-shadow: 0 24px 48px rgba(0,0,0,.18); width: 100%; }
+
+    /* Toast */
+    #toast-ct { position: fixed; bottom: 20px; right: 20px; z-index: 200; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    .toast { padding: 11px 16px; border-radius: 10px; font-size: 13px; font-weight: 500; color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.18); animation: tin .2s ease; max-width: 300px; pointer-events: auto; }
+    .toast-ok    { background: #16a34a; }
+    .toast-error { background: #dc2626; }
+    .toast-info  { background: #2563eb; }
+    @keyframes tin { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+    /* Loader */
+    #loader { position: fixed; inset: 0; background: rgba(255,255,255,.85); z-index: 150; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 12px; }
+    #loader.show { display: flex; }
+    .spin { width: 30px; height: 30px; border: 3px solid #fee2e2; border-top-color: #dc2626; border-radius: 50%; animation: rot .7s linear infinite; }
+    @keyframes rot { to { transform: rotate(360deg); } }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+
+    @media print { #loader, #toast-ct { display: none !important; } }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════ SCREEN: LOGIN ══════════════ -->
+<div id="screen-login" class="screen active min-h-screen flex-col">
+  <div class="border-b-4 border-red-600 bg-white px-6 py-3.5 shadow-sm flex items-center gap-3">
+    <div class="w-7 h-7 bg-red-600 rounded-md flex items-center justify-center">
+      <i data-lucide="shield-check" class="w-4 h-4 text-white"></i>
+    </div>
+    <span class="text-base font-black italic tracking-tight text-slate-900">ADEMINCOL</span>
+    <span class="text-xs text-slate-400">Sistema de Gestión</span>
+  </div>
+
+  <div class="flex-1 flex items-center justify-center p-6 bg-slate-50">
+    <div class="w-full max-w-sm">
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-xl overflow-hidden">
+        <div class="bg-gradient-to-br from-red-600 to-red-800 px-8 py-7">
+          <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mb-4 backdrop-blur">
+            <i data-lucide="lock" class="w-6 h-6 text-white"></i>
+          </div>
+          <h1 class="text-white font-bold text-xl leading-tight">Acceso al Sistema</h1>
+          <p class="text-red-200 text-xs mt-1">Ingrese sus credenciales para continuar</p>
+        </div>
+        <div class="p-7 space-y-4">
+          <div>
+            <label class="field-label">Usuario</label>
+            <input id="li-user" type="text" class="inp" placeholder="usuario.login" autocomplete="username">
+          </div>
+          <div>
+            <label class="field-label">Contraseña</label>
+            <input id="li-pass" type="password" class="inp" placeholder="••••••••" autocomplete="current-password">
+          </div>
+          <div id="li-err" class="hidden text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 flex items-center gap-2">
+            <i data-lucide="alert-circle" class="w-3.5 h-3.5 shrink-0"></i>
+            <span id="li-err-msg"></span>
+          </div>
+          <button onclick="doLogin()" id="btn-login" class="btn btn-primary w-full justify-center mt-1">
+            <i data-lucide="log-in" class="w-4 h-4"></i> Ingresar
+          </button>
+        </div>
+      </div>
+      <p class="text-center text-xs text-slate-400 mt-5">
+        ADEMINCOL © 2025 · <span class="font-mono text-slate-300">v1.0</span>
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ SCREEN: APP ══════════════ -->
+<div id="screen-app" class="screen min-h-screen flex-col">
+
+  <!-- Top navbar -->
+  <nav class="border-b-4 border-red-600 bg-white shadow-sm flex items-center px-4 py-2.5 gap-3 sticky top-0 z-30">
+    <button onclick="toggleSidebar()" class="lg:hidden p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-50 transition-colors">
+      <i data-lucide="menu" class="w-5 h-5"></i>
+    </button>
+    <div class="flex items-center gap-2">
+      <div class="w-6 h-6 bg-red-600 rounded flex items-center justify-center">
+        <i data-lucide="shield-check" class="w-3.5 h-3.5 text-white"></i>
+      </div>
+      <span class="font-black italic text-slate-900 text-base">ADEMINCOL</span>
+    </div>
+    <span class="text-slate-200 hidden md:block">|</span>
+    <span class="text-xs text-slate-500 hidden md:block">Supervisores e Inspectores</span>
+
+    <div class="ml-auto flex items-center gap-3">
+      <div class="hidden sm:flex items-center gap-2.5">
+        <div class="avatar" id="nav-avatar">?</div>
+        <div>
+          <div id="nav-nombre" class="text-xs font-semibold text-slate-800 leading-tight"></div>
+          <div id="nav-cargo"  class="text-xs text-slate-400 leading-tight"></div>
+        </div>
+      </div>
+      <div id="nav-rol-badge"></div>
+      <button onclick="logout()" class="btn btn-secondary btn-sm">
+        <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+        <span class="hidden sm:inline">Salir</span>
+      </button>
+    </div>
+  </nav>
+
+  <div class="flex flex-1 min-h-0 relative">
+    <!-- Overlay móvil -->
+    <div id="sidebar-ov" class="fixed inset-0 bg-black/40 z-20 lg:hidden hidden" onclick="toggleSidebar()"></div>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="w-56 bg-white border-r border-slate-100 flex flex-col py-3 overflow-y-auto
+      fixed lg:sticky lg:translate-x-0 -translate-x-full
+      top-[57px] h-[calc(100vh-57px)] z-20">
+
+      <!-- User card -->
+      <div class="px-3 mb-3">
+        <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+          <div class="text-xs font-semibold text-slate-800 truncate" id="side-nombre">—</div>
+          <div class="text-xs text-slate-400 truncate mt-0.5" id="side-cargo">—</div>
+          <div class="mt-1.5" id="side-cert"></div>
+        </div>
+      </div>
+
+      <!-- Nav -->
+      <div id="side-nav" class="flex-1 px-2 space-y-0.5 overflow-y-auto"></div>
+
+      <div class="px-4 pt-3 border-t border-slate-100 mt-2">
+        <p class="text-xs text-slate-300 text-center">ADEMINCOL © 2025</p>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 min-w-0 overflow-y-auto bg-slate-50">
+      <div id="view-dashboard"   class="view p-6 max-w-5xl mx-auto"></div>
+      <div id="view-usuarios"    class="view p-6 max-w-5xl mx-auto hidden"></div>
+      <div id="view-indicadores" class="view p-6 max-w-5xl mx-auto hidden"></div>
+      <div id="view-ots"         class="view p-6 max-w-5xl mx-auto hidden"></div>
+      <div id="view-nueva-ot"    class="view p-6 max-w-3xl mx-auto hidden"></div>
+      <div id="view-reportes"    class="view p-6 max-w-5xl mx-auto hidden"></div>
+      <div id="view-perfil"      class="view p-6 max-w-2xl mx-auto hidden"></div>
+    </main>
+  </div>
+</div>
+
+<!-- ══════════════ MODAL: USUARIO ══════════════ -->
+<div id="modal-usuario" class="modal-bd">
+  <div class="modal-box max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+      <div>
+        <h2 class="font-bold text-slate-800" id="mu-titulo">Crear Usuario</h2>
+        <p class="text-xs text-slate-400">Complete los campos del formulario</p>
+      </div>
+      <button onclick="cerrarModal('modal-usuario')" class="text-slate-300 hover:text-slate-600 transition-colors">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+    <div class="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="col-span-2">
+          <label class="field-label">Nombre Completo *</label>
+          <input id="u-nombre" type="text" class="inp" placeholder="Nombres y Apellidos">
+        </div>
+        <div>
+          <label class="field-label">Cargo *</label>
+          <input id="u-cargo" type="text" class="inp" placeholder="Ej: Inspector de Integridad">
+        </div>
+        <div>
+          <label class="field-label">Rol *</label>
+          <select id="u-rol" class="inp">
+            <option value="">Seleccione rol...</option>
+            <option value="ADMINISTRADOR">Administrador</option>
+            <option value="SUPERVISOR">Supervisor</option>
+            <option value="INSPECTOR">Inspector</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label">Correo Electrónico</label>
+          <input id="u-correo" type="email" class="inp" placeholder="usuario@empresa.com">
+        </div>
+        <div>
+          <label class="field-label">N° Certificado</label>
+          <input id="u-certificado" type="text" class="inp" placeholder="CERT-0001">
+        </div>
+        <div>
+          <label class="field-label">Usuario (login) *</label>
+          <input id="u-usuario" type="text" class="inp" placeholder="nombre.apellido">
+        </div>
+        <div>
+          <label class="field-label">Contraseña <span id="u-pass-hint" class="font-normal text-slate-300">(dejar vacío = no cambiar)</span></label>
+          <input id="u-contrasena" type="password" class="inp" placeholder="••••••••">
+        </div>
+        <div class="col-span-2">
+          <label class="field-label">Firma Digital</label>
+          <div class="border-2 border-dashed border-slate-200 rounded-xl p-5 text-center hover:border-red-300 transition-colors cursor-pointer"
+               onclick="document.getElementById('u-firma-input').click()">
+            <div id="firma-upload-area">
+              <i data-lucide="upload-cloud" class="w-8 h-8 text-slate-300 mx-auto mb-2"></i>
+              <p class="text-xs text-slate-400">Click para subir imagen de firma</p>
+              <p class="text-xs text-slate-300 mt-0.5">PNG / JPG · máx. 500 KB</p>
+            </div>
+            <img id="firma-preview" class="hidden mx-auto max-h-20 object-contain rounded" src="" alt="Firma">
+          </div>
+          <input id="u-firma-input" type="file" accept="image/png,image/jpeg" class="hidden" onchange="previewFirma(this)">
+        </div>
+      </div>
+    </div>
+    <div class="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 shrink-0">
+      <button onclick="cerrarModal('modal-usuario')" class="btn btn-secondary">Cancelar</button>
+      <button onclick="guardarUsuario()" class="btn btn-primary">
+        <i data-lucide="save" class="w-4 h-4"></i> Guardar Usuario
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ MODAL: CONFIRMAR ══════════════ -->
+<div id="modal-confirm" class="modal-bd">
+  <div class="modal-box max-w-sm p-7">
+    <div class="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center mx-auto mb-4">
+      <i data-lucide="alert-triangle" class="w-6 h-6 text-red-600"></i>
+    </div>
+    <h3 class="font-bold text-slate-800 text-center text-base" id="confirm-title">¿Confirmar?</h3>
+    <p class="text-xs text-slate-500 text-center mt-2 mb-6" id="confirm-msg">Esta acción no se puede deshacer.</p>
+    <div class="flex gap-3">
+      <button onclick="cerrarModal('modal-confirm')" class="btn btn-secondary flex-1 justify-center">Cancelar</button>
+      <button id="confirm-ok" class="btn btn-danger flex-1 justify-center">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ MODAL: DETALLE OT ══════════════ -->
+<div id="modal-ot" class="modal-bd">
+  <div class="modal-box max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
+      <div>
+        <h2 class="font-bold text-slate-800 font-mono" id="mot-num">OT-0000</h2>
+        <p class="text-xs text-slate-400 mt-0.5" id="mot-contrato">—</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <div id="mot-estado"></div>
+        <button onclick="cerrarModal('modal-ot')" class="text-slate-300 hover:text-slate-600 transition-colors ml-2">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+    <div id="mot-body" class="overflow-y-auto flex-1 px-6 py-5"></div>
+    <div class="px-6 py-4 border-t border-slate-100 flex justify-between items-center shrink-0">
+      <button onclick="cerrarModal('modal-ot')" class="btn btn-secondary">Cerrar</button>
+      <button id="mot-generar" class="btn btn-primary">
+        <i data-lucide="file-down" class="w-4 h-4"></i> Generar Reporte
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ LOADER ══════════════ -->
+<div id="loader">
+  <div class="spin"></div>
+  <div id="loader-txt" class="text-xs text-slate-500">Cargando...</div>
+</div>
+
+<!-- ══════════════ TOASTS ══════════════ -->
+<div id="toast-ct"></div>
+
+<script>
+// ══════════════════════════════════════════════════
+// ESTADO GLOBAL
+// ══════════════════════════════════════════════════
+var ST = {
+  user: null,
+  view: '',
+  usuarios: [],
+  ots: [],
+  editingUserId: null
+};
+
+// ══════════════════════════════════════════════════
+// UTILIDADES
+// ══════════════════════════════════════════════════
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showToast(msg, type) {
+  var c = document.getElementById('toast-ct');
+  var t = document.createElement('div');
+  t.className = 'toast toast-' + ({error:'error', info:'info'}[type] || 'ok');
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(function(){ if (t.parentNode) t.remove(); }, 3800);
+}
+
+function loader(show, txt) {
+  document.getElementById('loader').classList.toggle('show', !!show);
+  if (txt) document.getElementById('loader-txt').textContent = txt;
+}
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
+  document.getElementById('screen-' + id).classList.add('active');
+}
+
+function showView(v) {
+  document.querySelectorAll('.view').forEach(function(el){ el.classList.add('hidden'); el.classList.remove('active'); });
+  var el = document.getElementById('view-' + v);
+  if (el) { el.classList.remove('hidden'); el.classList.add('active'); }
+  ST.view = v;
+  document.querySelectorAll('.nav-link').forEach(function(a){
+    a.classList.toggle('active', a.dataset.view === v);
+  });
+  if (v === 'dashboard')   renderDashboard();
+  if (v === 'usuarios')    cargarUsuarios();
+  if (v === 'indicadores') cargarIndicadores();
+  if (v === 'ots')         cargarOTs();
+  if (v === 'nueva-ot')    renderNuevaOT(null);
+  if (v === 'reportes')    cargarReportes();
+  if (v === 'perfil')      renderPerfil();
+  // Cerrar sidebar en mobile
+  var sb = document.getElementById('sidebar');
+  if (sb.classList.contains('open')) toggleSidebar();
+}
+
+function abrirModal(id) {
+  document.getElementById(id).classList.add('show');
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function cerrarModal(id) {
+  document.getElementById(id).classList.remove('show');
+}
+
+function toggleSidebar() {
+  var sb = document.getElementById('sidebar');
+  var ov = document.getElementById('sidebar-ov');
+  var open = sb.classList.toggle('open');
+  ov.classList.toggle('hidden', !open);
+}
+
+function initials(nombre) {
+  var p = String(nombre || '?').trim().split(' ');
+  return (p[0][0] + (p[1] ? p[1][0] : '')).toUpperCase();
+}
+
+function rolBadge(rol) {
+  var m = { ADMINISTRADOR: ['badge-admin','Administrador'], SUPERVISOR: ['badge-super','Supervisor'], INSPECTOR: ['badge-insp','Inspector'] };
+  var info = m[rol] || ['badge-pend', rol];
+  return '<span class="badge ' + info[0] + '">' + info[1] + '</span>';
+}
+
+function estadoBadge(estado) {
+  var m = { 'PENDIENTE':['badge-pend','Pendiente'], 'EN CURSO':['badge-curso','En Curso'], 'COMPLETADA':['badge-comp','Completada'], 'CANCELADA':['badge-canc','Cancelada'] };
+  var info = m[estado] || ['badge-pend', estado || '—'];
+  return '<span class="badge ' + info[0] + '">' + info[1] + '</span>';
+}
+
+// ══════════════════════════════════════════════════
+// callGAS — 3 modos: localhost / GAS / mock
+// ══════════════════════════════════════════════════
+function callGAS(fn, args, onOk, onErr) {
+  var errFn = onErr || function(e){ showToast('Error: ' + (e.message || e), 'error'); };
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    fetch('/api/' + fn, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({args: args}) })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if (onOk) onOk(d); })
+      .catch(function(e){ errFn(e); });
+    return;
+  }
+  if (typeof google !== 'undefined' && google.script) {
+    var runner = google.script.run.withSuccessHandler(onOk).withFailureHandler(errFn);
+    runner[fn].apply(runner, args);
+    return;
+  }
+  mockGAS(fn, args, onOk, errFn);
+}
+
+// ══════════════════════════════════════════════════
+// AUTH
+// ══════════════════════════════════════════════════
+function doLogin() {
+  var u = document.getElementById('li-user').value.trim();
+  var p = document.getElementById('li-pass').value;
+  var errEl = document.getElementById('li-err');
+  var msgEl = document.getElementById('li-err-msg');
+  errEl.classList.add('hidden');
+  if (!u || !p) {
+    errEl.classList.remove('hidden');
+    msgEl.textContent = 'Complete usuario y contraseña.';
+    return;
+  }
+  document.getElementById('btn-login').disabled = true;
+  loader(true, 'Verificando credenciales…');
+  callGAS('validarUsuario', [u, p], function(res) {
+    loader(false);
+    document.getElementById('btn-login').disabled = false;
+    if (res && res.ok) {
+      ST.user = res.user;
+      setupAppUI();
+      showScreen('app');
+      showView('dashboard');
+    } else {
+      errEl.classList.remove('hidden');
+      msgEl.textContent = 'Usuario o contraseña incorrectos.';
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    }
+  }, function(e) {
+    loader(false);
+    document.getElementById('btn-login').disabled = false;
+    errEl.classList.remove('hidden');
+    msgEl.textContent = 'Sin conexión al servidor. Verifique que esté ejecutando server.py.';
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  });
+}
+
+function logout() {
+  ST.user = null; ST.view = '';
+  document.getElementById('li-user').value = '';
+  document.getElementById('li-pass').value = '';
+  document.getElementById('li-err').classList.add('hidden');
+  showScreen('login');
+}
+
+// ══════════════════════════════════════════════════
+// SETUP UI (post-login)
+// ══════════════════════════════════════════════════
+var NAV_MENUS = {
+  ADMINISTRADOR: [
+    { icon:'layout-dashboard', label:'Dashboard',          view:'dashboard'   },
+    { icon:'users',            label:'Gestión Usuarios',   view:'usuarios'    },
+    { icon:'bar-chart-2',      label:'Indicadores',        view:'indicadores' },
+    { icon:'clipboard-list',   label:'Órdenes de Trabajo', view:'ots'         },
+    { icon:'user',             label:'Mi Perfil',          view:'perfil'      }
+  ],
+  SUPERVISOR: [
+    { icon:'layout-dashboard', label:'Dashboard',   view:'dashboard'  },
+    { icon:'clipboard-list',   label:'Mis OTs',     view:'ots'        },
+    { icon:'plus-circle',      label:'Nueva OT',    view:'nueva-ot'   },
+    { icon:'file-text',        label:'Reportes',    view:'reportes'   },
+    { icon:'user',             label:'Mi Perfil',   view:'perfil'     }
+  ],
+  INSPECTOR: [
+    { icon:'layout-dashboard', label:'Dashboard',    view:'dashboard' },
+    { icon:'clipboard-list',   label:'OTs Asignadas',view:'ots'       },
+    { icon:'file-text',        label:'Mis Reportes', view:'reportes'  },
+    { icon:'user',             label:'Mi Perfil',    view:'perfil'    }
+  ]
+};
+
+function setupAppUI() {
+  var u = ST.user;
+  document.getElementById('nav-avatar').textContent = initials(u.nombre);
+  document.getElementById('nav-nombre').textContent = u.nombre;
+  document.getElementById('nav-cargo').textContent  = u.cargo || '';
+  document.getElementById('nav-rol-badge').innerHTML = rolBadge(u.rol);
+  document.getElementById('side-nombre').textContent = u.nombre;
+  document.getElementById('side-cargo').textContent  = u.cargo || '';
+  document.getElementById('side-cert').innerHTML = u.certificado
+    ? '<span class="text-xs text-slate-400">Cert: <strong class="font-mono text-slate-600">' + esc(u.certificado) + '</strong></span>'
+    : '';
+  var menu = NAV_MENUS[u.rol] || NAV_MENUS.INSPECTOR;
+  document.getElementById('side-nav').innerHTML = menu.map(function(item) {
+    return '<button class="nav-link w-full" data-view="' + item.view + '" onclick="showView(\'' + item.view + '\')">' +
+           '<i data-lucide="' + item.icon + '" class="w-4 h-4 shrink-0"></i>' +
+           '<span>' + item.label + '</span></button>';
+  }).join('');
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+// ══════════════════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════════════════
+function renderDashboard() {
+  loader(true, 'Cargando dashboard…');
+  callGAS('getIndicadores', [ST.user.id, ST.user.rol], function(d) {
+    loader(false);
+    var el = document.getElementById('view-dashboard');
+    if (ST.user.rol === 'ADMINISTRADOR') el.innerHTML = dashAdminHtml(d);
+    else if (ST.user.rol === 'SUPERVISOR') el.innerHTML = dashSuperHtml(d);
+    else el.innerHTML = dashInspHtml(d);
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }, function(){ loader(false); });
+}
+
+function statCard(val, lbl, icon, color, bg) {
+  return '<div class="stat-card flex items-center gap-4">' +
+    '<div class="w-12 h-12 ' + bg + ' rounded-xl flex items-center justify-center shrink-0">' +
+    '<i data-lucide="' + icon + '" class="w-5 h-5 ' + color + '"></i></div>' +
+    '<div><div class="stat-val">' + val + '</div><div class="stat-lbl">' + lbl + '</div></div></div>';
+}
+
+function dashAdminHtml(d) {
+  var html = '<div class="mb-5"><h1 class="text-xl font-bold text-slate-800">Panel Administrativo</h1>' +
+             '<p class="text-xs text-slate-400 mt-0.5">Resumen general del sistema</p></div>';
+  html += '<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">';
+  html += statCard(d.totalSupervisores||0, 'Supervisores',     'user-check',    'text-blue-600',  'bg-blue-50');
+  html += statCard(d.totalInspectores ||0, 'Inspectores',      'search',        'text-green-600', 'bg-green-50');
+  html += statCard(d.otsActivas       ||0, 'OTs Activas',      'clipboard-list','text-amber-600', 'bg-amber-50');
+  html += statCard(d.totalReportes    ||0, 'Reportes Generados','file-text',    'text-red-600',   'bg-red-50');
+  html += '</div>';
+  // OTs por estado
+  html += '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">';
+  html += '<div class="card p-5"><h3 class="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">' +
+          '<i data-lucide="bar-chart-3" class="w-4 h-4 text-red-500"></i> OTs por Estado</h3>';
+  var ests = [
+    { lbl:'Pendiente',  v:d.otsPendientes ||0, cls:'bg-amber-400' },
+    { lbl:'En Curso',   v:d.otsEnCurso    ||0, cls:'bg-blue-500'  },
+    { lbl:'Completada', v:d.otsCompletadas||0, cls:'bg-green-500' },
+    { lbl:'Cancelada',  v:d.otsCanceladas ||0, cls:'bg-slate-300' }
+  ];
+  var tot = ests.reduce(function(s,e){ return s+e.v; },0) || 1;
+  ests.forEach(function(e) {
+    html += '<div class="mb-3"><div class="flex justify-between text-xs mb-1">' +
+            '<span class="text-slate-600 font-medium">' + e.lbl + '</span>' +
+            '<span class="font-bold text-slate-800">' + e.v + '</span></div>' +
+            '<div class="prog"><div class="prog-bar ' + e.cls + '" style="width:' + Math.round(e.v/tot*100) + '%"></div></div></div>';
+  });
+  html += '</div>';
+  // OTs recientes
+  html += '<div class="card p-5"><h3 class="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">' +
+          '<i data-lucide="clock" class="w-4 h-4 text-red-500"></i> OTs Recientes</h3>';
+  var rec = d.otsRecientes || [];
+  if (rec.length) {
+    html += '<div class="divide-y divide-slate-50">';
+    rec.slice(0,5).forEach(function(o) {
+      html += '<div class="flex items-center justify-between py-2.5">' +
+              '<div><div class="text-xs font-bold text-slate-800 font-mono">' + esc(o.num_ot) + '</div>' +
+              '<div class="text-xs text-slate-400">' + esc(o.supervisor_nombre||'—') + '</div></div>' +
+              estadoBadge(o.estado) + '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<p class="text-xs text-slate-400 text-center py-6">Sin OTs registradas aún.</p>';
+  }
+  html += '</div></div>';
+  return html;
+}
+
+function dashSuperHtml(d) {
+  var nombre = ST.user.nombre.split(' ')[0];
+  var html = '<div class="mb-5"><h1 class="text-xl font-bold text-slate-800">Bienvenido, ' + esc(nombre) + '</h1>' +
+             '<p class="text-xs text-slate-400 mt-0.5">Gestión de sus Órdenes de Trabajo</p></div>';
+  html += '<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">';
+  html += statCard(d.misOTs        ||0, 'Mis OTs',      'clipboard-list',  'text-slate-600', 'bg-slate-50');
+  html += statCard(d.otsEnCurso    ||0, 'En Curso',     'loader-2',        'text-blue-600',  'bg-blue-50');
+  html += statCard(d.otsCompletadas||0, 'Completadas',  'check-circle-2',  'text-green-600', 'bg-green-50');
+  html += statCard(d.misReportes   ||0, 'Mis Reportes', 'file-text',       'text-red-600',   'bg-red-50');
+  html += '</div>';
+  html += '<div class="card p-5"><div class="flex items-center justify-between mb-4">' +
+          '<h3 class="text-sm font-semibold text-slate-700 flex items-center gap-2"><i data-lucide="clock" class="w-4 h-4 text-red-500"></i> Órdenes Recientes</h3>' +
+          '<button onclick="showView(\'ots\')" class="text-xs text-red-600 font-semibold hover:underline">Ver todas →</button></div>';
+  var rec = d.otsRecientes || [];
+  if (rec.length) {
+    html += '<table class="tbl"><thead><tr><th>N° OT</th><th>Contrato</th><th>Inspector</th><th>Estado</th><th></th></tr></thead><tbody>';
+    rec.slice(0,5).forEach(function(o) {
+      html += '<tr><td class="font-mono font-bold text-xs">' + esc(o.num_ot) + '</td>' +
+              '<td class="text-xs text-slate-600">' + esc(o.contrato||'—') + '</td>' +
+              '<td class="text-xs text-slate-500">' + esc(o.inspector_nombre||'Sin asignar') + '</td>' +
+              '<td>' + estadoBadge(o.estado) + '</td>' +
+              '<td><button onclick="verOT(' + o.id + ')" class="text-xs text-red-600 font-semibold hover:underline">Ver</button></td></tr>';
+    });
+    html += '</tbody></table>';
+  } else {
+    html += '<div class="text-center py-8"><i data-lucide="inbox" class="w-8 h-8 text-slate-200 mx-auto mb-2"></i>' +
+            '<p class="text-xs text-slate-400">No tiene OTs aún.</p>' +
+            '<button onclick="showView(\'nueva-ot\')" class="btn btn-primary btn-sm mt-3"><i data-lucide="plus" class="w-3.5 h-3.5"></i> Crear primera OT</button></div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function dashInspHtml(d) {
+  var nombre = ST.user.nombre.split(' ')[0];
+  var html = '<div class="mb-5"><h1 class="text-xl font-bold text-slate-800">Bienvenido, ' + esc(nombre) + '</h1>' +
+             '<p class="text-xs text-slate-400 mt-0.5">Sus OTs asignadas</p></div>';
+  html += '<div class="grid grid-cols-3 gap-4 mb-5">';
+  html += statCard(d.misOTs        ||0, 'Asignadas',   'clipboard-list', 'text-slate-600', 'bg-slate-50');
+  html += statCard(d.otsEnCurso    ||0, 'En Curso',    'loader-2',       'text-blue-600',  'bg-blue-50');
+  html += statCard(d.otsCompletadas||0, 'Completadas', 'check-circle-2', 'text-green-600', 'bg-green-50');
+  html += '</div>';
+  html += '<div class="card p-5"><h3 class="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">' +
+          '<i data-lucide="clipboard" class="w-4 h-4 text-red-500"></i> OTs Asignadas</h3>';
+  var rec = d.otsRecientes || [];
+  if (rec.length) {
+    html += '<div class="divide-y divide-slate-50">';
+    rec.forEach(function(o) {
+      html += '<div class="flex items-center gap-3 py-3">' +
+              '<div class="w-9 h-9 bg-blue-50 rounded-lg flex items-center justify-center shrink-0">' +
+              '<i data-lucide="clipboard" class="w-4 h-4 text-blue-500"></i></div>' +
+              '<div class="flex-1 min-w-0"><div class="text-xs font-bold text-slate-800 font-mono">' + esc(o.num_ot) + '</div>' +
+              '<div class="text-xs text-slate-400 truncate">' + esc(o.contrato||'—') + ' · Sup: ' + esc(o.supervisor_nombre||'—') + '</div></div>' +
+              estadoBadge(o.estado) + '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<p class="text-xs text-slate-400 text-center py-6">Sin OTs asignadas.</p>';
+  }
+  html += '</div>';
+  return html;
+}
+
+// ══════════════════════════════════════════════════
+// USUARIOS (Admin)
+// ══════════════════════════════════════════════════
+function cargarUsuarios() {
+  if (ST.user.rol !== 'ADMINISTRADOR') return;
+  loader(true, 'Cargando usuarios…');
+  callGAS('getUsuarios', [], function(data) {
+    loader(false);
+    ST.usuarios = data || [];
+    renderTablaUsuarios();
+  }, function(){ loader(false); });
+}
+
+function renderTablaUsuarios() {
+  var el = document.getElementById('view-usuarios');
+  var html =
+    '<div class="flex items-center justify-between mb-5">' +
+    '<div><h1 class="text-xl font-bold text-slate-800">Gestión de Usuarios</h1>' +
+    '<p class="text-xs text-slate-400 mt-0.5">' + ST.usuarios.length + ' usuarios registrados</p></div>' +
+    '<button onclick="abrirModalUsuario(null)" class="btn btn-primary"><i data-lucide="user-plus" class="w-4 h-4"></i> Nuevo Usuario</button></div>';
+
+  html += '<div class="card p-3 mb-4 flex flex-wrap gap-3 items-center">' +
+    '<input id="u-search" type="text" class="inp" style="max-width:220px" placeholder="Buscar nombre, correo..." oninput="filtrarUsuarios()">' +
+    '<select id="u-rol-filter" class="inp" style="max-width:160px" onchange="filtrarUsuarios()">' +
+    '<option value="">Todos los roles</option>' +
+    '<option value="ADMINISTRADOR">Administrador</option>' +
+    '<option value="SUPERVISOR">Supervisor</option>' +
+    '<option value="INSPECTOR">Inspector</option>' +
+    '</select></div>';
+
+  html += '<div class="card overflow-hidden"><table class="tbl"><thead><tr>' +
+    '<th>Nombre / Usuario</th><th>Correo</th><th>Cargo</th><th>N° Cert.</th><th>Rol</th><th>Firma</th>' +
+    '<th class="text-right pr-4">Acciones</th></tr></thead>' +
+    '<tbody id="u-tbody">' + renderFilasUsuarios(ST.usuarios) + '</tbody></table></div>';
+
+  el.innerHTML = html;
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function renderFilasUsuarios(lista) {
+  if (!lista.length) return '<tr><td colspan="7" class="text-center py-10 text-xs text-slate-400">No hay usuarios.</td></tr>';
+  return lista.map(function(u) {
+    var firmaHtml = u.firma
+      ? '<img src="' + esc(u.firma) + '" class="h-7 w-auto object-contain rounded border border-slate-100" alt="Firma">'
+      : '<span class="text-slate-300 text-xs">—</span>';
+    return '<tr>' +
+      '<td><div class="flex items-center gap-2.5">' +
+      '<div class="avatar text-xs">' + initials(u.nombre) + '</div>' +
+      '<div><div class="text-xs font-semibold text-slate-800">' + esc(u.nombre) + '</div>' +
+      '<div class="text-xs text-slate-400 font-mono">' + esc(u.usuario) + '</div></div></div></td>' +
+      '<td class="text-xs text-slate-500">' + esc(u.correo||'—') + '</td>' +
+      '<td class="text-xs text-slate-600">' + esc(u.cargo||'—') + '</td>' +
+      '<td class="text-xs font-mono text-slate-500">' + esc(u.certificado||'—') + '</td>' +
+      '<td>' + rolBadge(u.rol) + '</td>' +
+      '<td>' + firmaHtml + '</td>' +
+      '<td class="text-right pr-3">' +
+      '<button onclick="abrirModalUsuario(' + u.id + ')" class="btn btn-secondary btn-sm mr-1">' +
+      '<i data-lucide="pencil" class="w-3 h-3"></i></button>' +
+      '<button onclick="confirmarEliminar(' + u.id + ',\'' + esc(u.nombre) + '\')" class="btn btn-danger btn-sm">' +
+      '<i data-lucide="trash-2" class="w-3 h-3"></i></button>' +
+      '</td></tr>';
+  }).join('');
+}
+
+function filtrarUsuarios() {
+  var q   = (document.getElementById('u-search')     ||{value:''}).value.toLowerCase();
+  var rol = (document.getElementById('u-rol-filter') ||{value:''}).value;
+  var f = ST.usuarios.filter(function(u) {
+    return (!q   || (u.nombre+u.correo+u.usuario).toLowerCase().includes(q)) &&
+           (!rol || u.rol === rol);
+  });
+  var tbody = document.getElementById('u-tbody');
+  if (tbody) { tbody.innerHTML = renderFilasUsuarios(f); if (typeof lucide !== 'undefined') lucide.createIcons(); }
+}
+
+function abrirModalUsuario(id) {
+  ST.editingUserId = id;
+  document.getElementById('mu-titulo').textContent = id ? 'Editar Usuario' : 'Crear Usuario';
+  document.getElementById('u-pass-hint').style.display = id ? '' : 'none';
+  ['u-nombre','u-cargo','u-correo','u-certificado','u-usuario','u-contrasena'].forEach(function(f){ document.getElementById(f).value = ''; });
+  document.getElementById('u-rol').value = '';
+  document.getElementById('firma-preview').classList.add('hidden');
+  document.getElementById('firma-upload-area').classList.remove('hidden');
+  document.getElementById('u-firma-input').value = '';
+  if (id) {
+    var u = ST.usuarios.find(function(x){ return x.id === id; });
+    if (u) {
+      document.getElementById('u-nombre').value      = u.nombre      || '';
+      document.getElementById('u-cargo').value       = u.cargo       || '';
+      document.getElementById('u-correo').value      = u.correo      || '';
+      document.getElementById('u-certificado').value = u.certificado || '';
+      document.getElementById('u-usuario').value     = u.usuario     || '';
+      document.getElementById('u-rol').value         = u.rol         || '';
+      if (u.firma) {
+        document.getElementById('firma-preview').src = u.firma;
+        document.getElementById('firma-preview').classList.remove('hidden');
+        document.getElementById('firma-upload-area').classList.add('hidden');
+      }
+    }
+  }
+  abrirModal('modal-usuario');
+}
+
+function previewFirma(input) {
+  if (!input.files || !input.files[0]) return;
+  var f = input.files[0];
+  if (f.size > 600 * 1024) { showToast('Imagen demasiado grande (máx. 500 KB)', 'error'); input.value=''; return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = document.getElementById('firma-preview');
+    img.src = e.target.result;
+    img.classList.remove('hidden');
+    document.getElementById('firma-upload-area').classList.add('hidden');
+  };
+  reader.readAsDataURL(f);
+}
+
+function guardarUsuario() {
+  var data = {
+    id:          ST.editingUserId,
+    nombre:      document.getElementById('u-nombre').value.trim(),
+    cargo:       document.getElementById('u-cargo').value.trim(),
+    correo:      document.getElementById('u-correo').value.trim(),
+    certificado: document.getElementById('u-certificado').value.trim(),
+    usuario:     document.getElementById('u-usuario').value.trim(),
+    contrasena:  document.getElementById('u-contrasena').value,
+    rol:         document.getElementById('u-rol').value,
+    firma:       document.getElementById('firma-preview').classList.contains('hidden') ? '' : document.getElementById('firma-preview').src
+  };
+  if (!data.nombre || !data.rol || !data.usuario) { showToast('Nombre, rol y usuario son obligatorios', 'error'); return; }
+  if (!ST.editingUserId && !data.contrasena) { showToast('La contraseña es obligatoria para nuevos usuarios', 'error'); return; }
+  loader(true, 'Guardando usuario…');
+  callGAS(ST.editingUserId ? 'updateUsuario' : 'createUsuario', [data], function(res) {
+    loader(false);
+    if (res && res.ok) {
+      cerrarModal('modal-usuario');
+      showToast(ST.editingUserId ? 'Usuario actualizado' : 'Usuario creado exitosamente', 'ok');
+      cargarUsuarios();
+    } else {
+      showToast((res && res.error) || 'Error al guardar usuario', 'error');
+    }
+  }, function(e){ loader(false); showToast('Error: ' + (e.message||e), 'error'); });
+}
+
+function confirmarEliminar(id, nombre) {
+  document.getElementById('confirm-title').textContent = 'Eliminar usuario';
+  document.getElementById('confirm-msg').textContent   = '¿Eliminar a "' + nombre + '"? Esta acción no se puede deshacer.';
+  document.getElementById('confirm-ok').onclick = function() {
+    cerrarModal('modal-confirm');
+    loader(true, 'Eliminando…');
+    callGAS('deleteUsuario', [id], function(res) {
+      loader(false);
+      if (res && res.ok) { showToast('Usuario eliminado', 'ok'); cargarUsuarios(); }
+      else showToast((res && res.error) || 'Error al eliminar', 'error');
+    }, function(e){ loader(false); showToast('Error: '+(e.message||e),'error'); });
+  };
+  abrirModal('modal-confirm');
+}
+
+// ══════════════════════════════════════════════════
+// INDICADORES (Admin)
+// ══════════════════════════════════════════════════
+function cargarIndicadores() {
+  loader(true, 'Cargando indicadores…');
+  callGAS('getIndicadores', [null, 'ADMINISTRADOR'], function(d) {
+    loader(false);
+    var el = document.getElementById('view-indicadores');
+    el.innerHTML = renderIndicadoresHtml(d);
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }, function(){ loader(false); });
+}
+
+function renderIndicadoresHtml(d) {
+  var html = '<div class="mb-5"><h1 class="text-xl font-bold text-slate-800">Indicadores de Rendimiento</h1>' +
+             '<p class="text-xs text-slate-400 mt-0.5">Métricas del equipo de trabajo</p></div>';
+  html += '<div class="grid grid-cols-1 lg:grid-cols-2 gap-5">';
+  // Supervisores
+  html += '<div class="card p-5"><h3 class="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">' +
+          '<i data-lucide="user-check" class="w-4 h-4 text-blue-500"></i> Supervisores — OTs</h3>';
+  var supD = d.indicadoresSupervisores || [];
+  if (supD.length) {
+    html += '<div class="space-y-4">';
+    supD.forEach(function(s) {
+      var total = (s.completadas||0) + (s.en_curso||0) + (s.pendientes||0);
+      html += '<div class="flex items-start gap-3">' +
+              '<div class="avatar text-xs shrink-0">' + initials(s.nombre) + '</div>' +
+              '<div class="flex-1 min-w-0">' +
+              '<div class="flex justify-between text-xs mb-1.5"><span class="font-semibold text-slate-800 truncate">' + esc(s.nombre) + '</span>' +
+              '<span class="text-slate-400 shrink-0 ml-2">' + total + ' OTs</span></div>' +
+              '<div class="prog mb-1.5"><div class="prog-bar bg-green-500" style="width:' + (total ? Math.round((s.completadas||0)/total*100):0) + '%"></div></div>' +
+              '<div class="flex gap-3 flex-wrap">' +
+              '<span class="text-xs text-green-600 font-medium">' + (s.completadas||0) + ' completadas</span>' +
+              '<span class="text-xs text-blue-600 font-medium">' + (s.en_curso||0) + ' en curso</span>' +
+              '<span class="text-xs text-amber-600 font-medium">' + (s.pendientes||0) + ' pendientes</span>' +
+              '</div></div></div>';
+    });
+    html += '</div>';
+  } else html += '<p class="text-xs text-slate-400 text-center py-6">Sin datos.</p>';
+  html += '</div>';
+  // Inspectores
+  html += '<div class="card p-5"><h3 class="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">' +
+          '<i data-lucide="search" class="w-4 h-4 text-green-500"></i> Inspectores — OTs Asignadas</h3>';
+  var inspD = d.indicadoresInspectores || [];
+  if (inspD.length) {
+    html += '<div class="divide-y divide-slate-50">';
+    inspD.forEach(function(i) {
+      html += '<div class="flex items-center gap-3 py-3">' +
+              '<div class="avatar text-xs shrink-0 bg-green-50 text-green-700">' + initials(i.nombre) + '</div>' +
+              '<div class="flex-1 min-w-0"><div class="text-xs font-semibold text-slate-800 truncate">' + esc(i.nombre) + '</div>' +
+              '<div class="text-xs text-slate-400 truncate">' + esc(i.cargo||'—') + '</div></div>' +
+              '<span class="badge badge-insp ml-2">' + (i.total_ots||0) + ' OTs</span></div>';
+    });
+    html += '</div>';
+  } else html += '<p class="text-xs text-slate-400 text-center py-6">Sin inspectores.</p>';
+  html += '</div></div>';
+  return html;
+}
+
+// ══════════════════════════════════════════════════
+// OTs
+// ══════════════════════════════════════════════════
+function cargarOTs() {
+  loader(true, 'Cargando órdenes de trabajo…');
+  callGAS('getOTs', [ST.user.id, ST.user.rol], function(data) {
+    loader(false);
+    ST.ots = data || [];
+    renderTablaOTs();
+  }, function(){ loader(false); });
+}
+
+function renderTablaOTs() {
+  var u = ST.user;
+  var titulo = u.rol === 'INSPECTOR' ? 'OTs Asignadas' : u.rol === 'ADMINISTRADOR' ? 'Órdenes de Trabajo' : 'Mis OTs';
+  var el = document.getElementById('view-ots');
+  var html = '<div class="flex items-center justify-between mb-5">' +
+             '<div><h1 class="text-xl font-bold text-slate-800">' + titulo + '</h1>' +
+             '<p class="text-xs text-slate-400 mt-0.5">' + ST.ots.length + ' órdenes de trabajo</p></div>';
+  if (u.rol !== 'INSPECTOR') {
+    html += '<button onclick="showView(\'nueva-ot\')" class="btn btn-primary"><i data-lucide="plus" class="w-4 h-4"></i> Nueva OT</button>';
+  }
+  html += '</div>';
+  html += '<div class="card p-3 mb-4 flex flex-wrap gap-3">' +
+    '<input id="ot-search" type="text" class="inp" style="max-width:220px" placeholder="Buscar OT, contrato, cliente..." oninput="filtrarOTs()">' +
+    '<select id="ot-est-filter" class="inp" style="max-width:160px" onchange="filtrarOTs()">' +
+    '<option value="">Todos los estados</option>' +
+    '<option value="PENDIENTE">Pendiente</option><option value="EN CURSO">En Curso</option>' +
+    '<option value="COMPLETADA">Completada</option><option value="CANCELADA">Cancelada</option>' +
+    '</select></div>';
+  html += '<div class="card overflow-hidden"><table class="tbl"><thead><tr>' +
+          '<th>N° OT</th><th>Contrato</th><th>Cliente</th><th>Supervisor</th><th>Inspector</th><th>Fechas</th><th>Estado</th>' +
+          '<th class="text-right pr-4">Acciones</th></tr></thead>' +
+          '<tbody id="ots-tbody">' + renderFilasOTs(ST.ots) + '</tbody></table></div>';
+  el.innerHTML = html;
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function renderFilasOTs(lista) {
+  if (!lista.length) return '<tr><td colspan="8" class="text-center py-12">' +
+    '<div class="flex flex-col items-center gap-2"><i data-lucide="inbox" class="w-8 h-8 text-slate-200"></i>' +
+    '<span class="text-xs text-slate-400">No hay órdenes de trabajo.</span></div></td></tr>';
+  return lista.map(function(ot) {
+    var canEdit   = ST.user.rol==='ADMINISTRADOR' || (ST.user.rol==='SUPERVISOR' && ot.supervisor_id===ST.user.id);
+    var canReport = ST.user.rol !== 'INSPECTOR';
+    return '<tr>' +
+      '<td class="font-mono font-bold text-xs text-slate-800">' + esc(ot.num_ot) + '</td>' +
+      '<td class="text-xs text-slate-600 max-w-xs truncate">' + esc(ot.contrato||'—') + '</td>' +
+      '<td class="text-xs text-slate-500">' + esc(ot.cliente||'—') + '</td>' +
+      '<td><div class="flex items-center gap-1.5">' +
+        '<div class="w-6 h-6 bg-blue-50 rounded-full flex items-center justify-center text-xs font-bold text-blue-600">' + initials(ot.supervisor_nombre||'?') + '</div>' +
+        '<span class="text-xs text-slate-600">' + esc(ot.supervisor_nombre||'—') + '</span></div></td>' +
+      '<td class="text-xs text-slate-500">' + esc(ot.inspector_nombre||'Sin asignar') + '</td>' +
+      '<td class="text-xs text-slate-400 whitespace-nowrap">' + esc(ot.fecha_inicio||'') + (ot.fecha_fin ? ' – ' + ot.fecha_fin : '') + '</td>' +
+      '<td>' + estadoBadge(ot.estado) + '</td>' +
+      '<td class="text-right pr-3 whitespace-nowrap">' +
+        '<button onclick="verOT(' + ot.id + ')" class="btn btn-secondary btn-sm mr-1" title="Ver detalle"><i data-lucide="eye" class="w-3 h-3"></i></button>' +
+        (canEdit ? '<button onclick="editarOT(' + ot.id + ')" class="btn btn-secondary btn-sm mr-1" title="Editar"><i data-lucide="pencil" class="w-3 h-3"></i></button>' : '') +
+        (canReport ? '<button onclick="generarReporteOT(' + ot.id + ')" class="btn btn-primary btn-sm" title="Generar Reporte"><i data-lucide="file-down" class="w-3 h-3"></i></button>' : '') +
+      '</td></tr>';
+  }).join('');
+}
+
+function filtrarOTs() {
+  var q   = (document.getElementById('ot-search')     ||{value:''}).value.toLowerCase();
+  var est = (document.getElementById('ot-est-filter') ||{value:''}).value;
+  var f = ST.ots.filter(function(o) {
+    return (!q   || (o.num_ot+o.contrato+o.cliente+(o.supervisor_nombre||'')).toLowerCase().includes(q)) &&
+           (!est || o.estado === est);
+  });
+  var tbody = document.getElementById('ots-tbody');
+  if (tbody) { tbody.innerHTML = renderFilasOTs(f); if (typeof lucide !== 'undefined') lucide.createIcons(); }
+}
+
+function verOT(id) {
+  var ot = ST.ots.find(function(x){ return x.id===id; });
+  if (!ot) { showToast('OT no encontrada','error'); return; }
+  document.getElementById('mot-num').textContent     = 'OT: ' + ot.num_ot;
+  document.getElementById('mot-contrato').textContent = ot.contrato || '—';
+  document.getElementById('mot-estado').innerHTML    = estadoBadge(ot.estado);
+  var fields = [
+    ['N° Orden de Trabajo', ot.num_ot],
+    ['Contrato',            ot.contrato],
+    ['Cliente',             ot.cliente],
+    ['Ubicación / Sitio',   ot.ubicacion],
+    ['Supervisor',          ot.supervisor_nombre],
+    ['Inspector',           ot.inspector_nombre],
+    ['Fecha Inicio',        ot.fecha_inicio],
+    ['Fecha Fin',           ot.fecha_fin],
+    ['Estado',              ot.estado, true],
+    ['Descripción',         ot.descripcion, false, true],
+    ['Observaciones',       ot.observaciones, false, true]
+  ];
+  var body = '<dl class="grid grid-cols-2 gap-x-6 gap-y-4">';
+  fields.forEach(function(f) {
+    if (!f[1]) return;
+    body += '<div class="col-span-' + (f[3] ? '2' : '1') + '">' +
+            '<dt class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">' + f[0] + '</dt>' +
+            '<dd class="text-sm text-slate-800">' + (f[2] ? estadoBadge(f[1]) : esc(f[1])) + '</dd></div>';
+  });
+  body += '</dl>';
+  document.getElementById('mot-body').innerHTML = body;
+  var genBtn = document.getElementById('mot-generar');
+  if (ST.user.rol === 'INSPECTOR') genBtn.classList.add('hidden');
+  else {
+    genBtn.classList.remove('hidden');
+    genBtn.onclick = function(){ cerrarModal('modal-ot'); generarReporteOT(id); };
+  }
+  abrirModal('modal-ot');
+}
+
+// ══════════════════════════════════════════════════
+// NUEVA / EDITAR OT
+// ══════════════════════════════════════════════════
+function renderNuevaOT(data) {
+  data = data || {};
+  loader(true, 'Preparando formulario…');
+  callGAS('getUsuarios', [], function(usuarios) {
+    loader(false);
+    var sups  = usuarios.filter(function(u){ return u.rol==='SUPERVISOR'; });
+    var insps = usuarios.filter(function(u){ return u.rol==='INSPECTOR';  });
+
+    var supOpts = sups.map(function(u) {
+      var sel = (data.supervisor_id===u.id || (!data.supervisor_id && ST.user.rol==='SUPERVISOR' && ST.user.id===u.id)) ? ' selected' : '';
+      return '<option value="' + u.id + '"' + sel + '>' + esc(u.nombre) + '</option>';
+    }).join('');
+    var inspOpts = '<option value="">Sin asignar</option>' + insps.map(function(u) {
+      return '<option value="' + u.id + '"' + (data.inspector_id===u.id?' selected':'') + '>' + esc(u.nombre) + '</option>';
+    }).join('');
+    var estados = ['PENDIENTE','EN CURSO','COMPLETADA','CANCELADA'];
+    var estOpts = estados.map(function(e) {
+      return '<option value="' + e + '"' + (data.estado===e||(!data.estado&&e==='PENDIENTE')?' selected':'') + '>' + e + '</option>';
+    }).join('');
+
+    var isSupReadonly = ST.user.rol === 'SUPERVISOR';
+    var supField = isSupReadonly
+      ? '<input type="hidden" id="ot-supervisor" value="' + ST.user.id + '">' +
+        '<div class="inp bg-slate-50 text-slate-500 cursor-default">' + esc(ST.user.nombre) + '</div>'
+      : '<select id="ot-supervisor" class="inp"><option value="">Seleccione supervisor…</option>' + supOpts + '</select>';
+
+    var el = document.getElementById('view-nueva-ot');
+    el.innerHTML =
+      '<div class="mb-5 flex items-center gap-3">' +
+      '<button onclick="showView(\'ots\')" class="btn btn-secondary btn-sm"><i data-lucide="arrow-left" class="w-3.5 h-3.5"></i></button>' +
+      '<div><h1 class="text-xl font-bold text-slate-800">' + (data.id?'Editar Orden de Trabajo':'Nueva Orden de Trabajo') + '</h1>' +
+      '<p class="text-xs text-slate-400 mt-0.5">Complete los datos de la OT</p></div></div>' +
+
+      '<div class="card p-6">' +
+      '<input type="hidden" id="ot-id" value="' + (data.id||'') + '">' +
+      '<div class="grid grid-cols-2 gap-4">' +
+
+      '<div><label class="field-label">N° Orden de Trabajo *</label>' +
+      '<input id="ot-num" type="text" class="inp" placeholder="OT-2025-001" value="' + esc(data.num_ot||'') + '"></div>' +
+
+      '<div><label class="field-label">Contrato</label>' +
+      '<input id="ot-contrato" type="text" class="inp" placeholder="CTR-2025-XYZ" value="' + esc(data.contrato||'') + '"></div>' +
+
+      '<div><label class="field-label">Cliente</label>' +
+      '<input id="ot-cliente" type="text" class="inp" placeholder="Nombre del cliente" value="' + esc(data.cliente||'') + '"></div>' +
+
+      '<div><label class="field-label">Ubicación / Sitio</label>' +
+      '<input id="ot-ubicacion" type="text" class="inp" placeholder="Campo, estación, instalación..." value="' + esc(data.ubicacion||'') + '"></div>' +
+
+      '<div><label class="field-label">Supervisor *</label>' + supField + '</div>' +
+
+      '<div><label class="field-label">Inspector Asignado</label>' +
+      '<select id="ot-inspector" class="inp">' + inspOpts + '</select></div>' +
+
+      '<div><label class="field-label">Fecha Inicio</label>' +
+      '<input id="ot-fi" type="date" class="inp" value="' + esc(data.fecha_inicio||'') + '"></div>' +
+
+      '<div><label class="field-label">Fecha Fin (estimada)</label>' +
+      '<input id="ot-ff" type="date" class="inp" value="' + esc(data.fecha_fin||'') + '"></div>' +
+
+      '<div><label class="field-label">Estado</label>' +
+      '<select id="ot-estado" class="inp">' + estOpts + '</select></div>' +
+
+      '<div class="col-span-2"><label class="field-label">Descripción del Trabajo</label>' +
+      '<textarea id="ot-desc" class="inp" rows="3" placeholder="Alcance y descripción del trabajo a realizar...">' + esc(data.descripcion||'') + '</textarea></div>' +
+
+      '<div class="col-span-2"><label class="field-label">Observaciones</label>' +
+      '<textarea id="ot-obs" class="inp" rows="2" placeholder="Notas adicionales...">' + esc(data.observaciones||'') + '</textarea></div>' +
+
+      '</div>' +
+      '<div class="flex justify-end gap-3 pt-5 mt-2 border-t border-slate-100">' +
+      '<button onclick="showView(\'ots\')" class="btn btn-secondary">Cancelar</button>' +
+      '<button onclick="guardarOT()" class="btn btn-primary"><i data-lucide="save" class="w-4 h-4"></i> ' +
+      (data.id ? 'Guardar Cambios' : 'Crear OT') + '</button></div></div>';
+
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }, function(){ loader(false); });
+}
+
+function editarOT(id) {
+  var ot = ST.ots.find(function(x){ return x.id===id; });
+  if (!ot) return;
+  showView('nueva-ot');
+  setTimeout(function(){ renderNuevaOT(ot); }, 80);
+}
+
+function guardarOT() {
+  var idVal = document.getElementById('ot-id').value;
+  var supEl = document.getElementById('ot-supervisor');
+  var supId = supEl ? (parseInt(supEl.value)||null) : (ST.user.rol==='SUPERVISOR'?ST.user.id:null);
+  var data = {
+    id:           idVal ? parseInt(idVal) : null,
+    num_ot:       document.getElementById('ot-num').value.trim(),
+    contrato:     document.getElementById('ot-contrato').value.trim(),
+    cliente:      document.getElementById('ot-cliente').value.trim(),
+    ubicacion:    document.getElementById('ot-ubicacion').value.trim(),
+    supervisor_id: supId,
+    inspector_id:  parseInt((document.getElementById('ot-inspector')||{value:''}).value)||null,
+    fecha_inicio:  document.getElementById('ot-fi').value,
+    fecha_fin:     document.getElementById('ot-ff').value,
+    estado:        document.getElementById('ot-estado').value,
+    descripcion:   document.getElementById('ot-desc').value.trim(),
+    observaciones: document.getElementById('ot-obs').value.trim()
+  };
+  if (!data.num_ot) { showToast('El número de OT es obligatorio','error'); return; }
+  if (!data.supervisor_id) { showToast('Debe asignar un supervisor','error'); return; }
+  loader(true, 'Guardando OT…');
+  callGAS(data.id ? 'updateOT' : 'createOT', [data], function(res) {
+    loader(false);
+    if (res && res.ok) { showToast(data.id ? 'OT actualizada' : 'OT creada exitosamente','ok'); showView('ots'); }
+    else showToast((res&&res.error)||'Error al guardar OT','error');
+  }, function(e){ loader(false); showToast('Error: '+(e.message||e),'error'); });
+}
+
+// ══════════════════════════════════════════════════
+// REPORTES
+// ══════════════════════════════════════════════════
+function cargarReportes() {
+  loader(true, 'Cargando reportes…');
+  callGAS('getReportes', [ST.user.id, ST.user.rol], function(data) {
+    loader(false);
+    var el = document.getElementById('view-reportes');
+    var lista = data || [];
+    var html = '<div class="mb-5"><h1 class="text-xl font-bold text-slate-800">Reportes</h1>' +
+               '<p class="text-xs text-slate-400 mt-0.5">' + lista.length + ' reportes generados</p></div>';
+    if (lista.length) {
+      html += '<div class="card overflow-hidden"><table class="tbl"><thead><tr>' +
+              '<th>N° OT</th><th>Nombre del Reporte</th><th>Generado por</th><th>Fecha</th><th class="text-right pr-4">Acciones</th></tr></thead><tbody>';
+      lista.forEach(function(r) {
+        html += '<tr><td class="font-mono font-bold text-xs">' + esc(r.num_ot||'—') + '</td>' +
+                '<td class="text-xs text-slate-700">' + esc(r.nombre||'—') + '</td>' +
+                '<td class="text-xs text-slate-500">' + esc(r.generado_por_nombre||'—') + '</td>' +
+                '<td class="text-xs text-slate-400">' + esc(r.fecha_generacion||'—') + '</td>' +
+                '<td class="text-right pr-3">' +
+                '<button onclick="verReporte(' + r.id + ')" class="btn btn-secondary btn-sm"><i data-lucide="eye" class="w-3 h-3"></i> Ver</button></td></tr>';
+      });
+      html += '</tbody></table></div>';
+    } else {
+      html += '<div class="card p-14 text-center">' +
+              '<i data-lucide="file-text" class="w-10 h-10 text-slate-200 mx-auto mb-3"></i>' +
+              '<p class="text-sm text-slate-400 font-medium">No hay reportes generados aún</p>' +
+              (ST.user.rol!=='INSPECTOR' ? '<button onclick="showView(\'ots\')" class="btn btn-primary btn-sm mt-4"><i data-lucide="arrow-right" class="w-3.5 h-3.5"></i> Ir a OTs</button>' : '') +
+              '</div>';
+    }
+    el.innerHTML = html;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+  }, function(){ loader(false); });
+}
+
+function generarReporteOT(otId) {
+  loader(true, 'Generando reporte…');
+  callGAS('generarReporte', [otId, ST.user.id], function(res) {
+    loader(false);
+    if (res && res.ok) {
+      showToast('Reporte generado exitosamente','ok');
+      if (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1') {
+        window.open('/reporte/' + otId, '_blank');
+      } else {
+        showView('reportes');
+      }
+    } else showToast((res&&res.error)||'Error al generar reporte','error');
+  }, function(e){ loader(false); showToast('Error: '+(e.message||e),'error'); });
+}
+
+function verReporte(id) {
+  if (window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1') {
+    window.open('/reporte-id/' + id, '_blank');
+  } else {
+    showToast('Vista de reporte disponible en modo local','info');
+  }
+}
+
+// ══════════════════════════════════════════════════
+// PERFIL
+// ══════════════════════════════════════════════════
+function renderPerfil() {
+  var u = ST.user;
+  var firmaHtml = u.firma
+    ? '<img src="' + esc(u.firma) + '" class="max-h-24 w-auto object-contain rounded-xl border border-slate-100 p-3 bg-white" alt="Firma">'
+    : '<div class="h-20 w-44 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center"><span class="text-xs text-slate-300">Sin firma registrada</span></div>';
+  var el = document.getElementById('view-perfil');
+  el.innerHTML =
+    '<div class="mb-5"><h1 class="text-xl font-bold text-slate-800">Mi Perfil</h1>' +
+    '<p class="text-xs text-slate-400 mt-0.5">Información de su cuenta</p></div>' +
+
+    '<div class="card overflow-hidden mb-4">' +
+    '<div class="bg-gradient-to-r from-red-600 to-red-800 h-24 relative"></div>' +
+    '<div class="px-6 pb-6">' +
+    '<div class="flex items-end gap-4 -mt-8 mb-4">' +
+    '<div class="avatar avatar-lg border-4 border-white shadow-md shrink-0">' + initials(u.nombre) + '</div>' +
+    '<div class="pb-1">' +
+    '<h2 class="text-lg font-bold text-slate-800 leading-tight">' + esc(u.nombre) + '</h2>' +
+    '<p class="text-sm text-slate-500">' + esc(u.cargo||'—') + '</p>' +
+    '<div class="mt-1">' + rolBadge(u.rol) + '</div></div></div>' +
+    '<div class="grid grid-cols-2 gap-5">' +
+    '<div><p class="field-label">Correo Electrónico</p><p class="text-sm text-slate-700">' + esc(u.correo||'—') + '</p></div>' +
+    '<div><p class="field-label">N° Certificado</p><p class="text-sm font-mono font-semibold text-slate-700">' + esc(u.certificado||'—') + '</p></div>' +
+    '</div>' +
+    '<div class="mt-5"><p class="field-label mb-2">Firma Digital</p>' + firmaHtml + '</div>' +
+    '</div></div>' +
+
+    '<div class="card p-5">' +
+    '<h3 class="text-sm font-semibold text-slate-700 mb-4">Cambiar Contraseña</h3>' +
+    '<div class="grid grid-cols-2 gap-3">' +
+    '<div><label class="field-label">Nueva Contraseña</label><input id="pp1" type="password" class="inp" placeholder="••••••••"></div>' +
+    '<div><label class="field-label">Confirmar Contraseña</label><input id="pp2" type="password" class="inp" placeholder="••••••••"></div>' +
+    '</div>' +
+    '<div class="flex justify-end mt-3">' +
+    '<button onclick="cambiarContrasena()" class="btn btn-primary btn-sm"><i data-lucide="lock" class="w-3.5 h-3.5"></i> Actualizar Contraseña</button>' +
+    '</div></div>';
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function cambiarContrasena() {
+  var p1 = document.getElementById('pp1').value;
+  var p2 = document.getElementById('pp2').value;
+  if (!p1) { showToast('Ingrese la nueva contraseña','error'); return; }
+  if (p1 !== p2) { showToast('Las contraseñas no coinciden','error'); return; }
+  if (p1.length < 4) { showToast('Mínimo 4 caracteres','error'); return; }
+  loader(true, 'Actualizando…');
+  callGAS('cambiarContrasena', [ST.user.id, p1], function(res) {
+    loader(false);
+    if (res && res.ok) {
+      showToast('Contraseña actualizada','ok');
+      document.getElementById('pp1').value = '';
+      document.getElementById('pp2').value = '';
+    } else showToast((res&&res.error)||'Error al cambiar contraseña','error');
+  }, function(e){ loader(false); showToast('Error: '+(e.message||e),'error'); });
+}
+
+// ══════════════════════════════════════════════════
+// MOCK GAS (file:// o sin servidor)
+// ══════════════════════════════════════════════════
+function mockGAS(fn, args, cb) {
+  var MU = [
+    {id:1,nombre:'Carlos Méndez Ruíz',  cargo:'Supervisor Senior',       rol:'SUPERVISOR',    usuario:'carlos.m',correo:'carlos@ademincol.com', certificado:'CERT-SUP-001',firma:''},
+    {id:2,nombre:'Ana García López',     cargo:'Inspector de Integridad', rol:'INSPECTOR',     usuario:'ana.g',   correo:'ana@ademincol.com',    certificado:'CERT-INS-002',firma:''},
+    {id:3,nombre:'Luis Torres Pérez',    cargo:'Inspector END',           rol:'INSPECTOR',     usuario:'luis.t',  correo:'luis@ademincol.com',   certificado:'CERT-INS-003',firma:''},
+    {id:4,nombre:'María Rodríguez V.',   cargo:'Supervisora de Campo',    rol:'SUPERVISOR',    usuario:'maria.r', correo:'maria@ademincol.com',  certificado:'CERT-SUP-004',firma:''},
+    {id:5,nombre:'Administrador General',cargo:'Administrador',           rol:'ADMINISTRADOR', usuario:'admin',   correo:'admin@ademincol.com',  certificado:'ADM-001',     firma:''}
+  ];
+  var MOT = [
+    {id:1,num_ot:'OT-2025-001',contrato:'CTR-2025-A',cliente:'ECOPETROL S.A.',   ubicacion:'Campo Rubiales',  supervisor_id:1,supervisor_nombre:'Carlos Méndez Ruíz',inspector_id:2,inspector_nombre:'Ana García López', fecha_inicio:'2025-01-15',fecha_fin:'2025-02-28',estado:'COMPLETADA', descripcion:'Inspección espesores UT en líneas de producción.',observaciones:''},
+    {id:2,num_ot:'OT-2025-002',contrato:'CTR-2025-B',cliente:'FRONTERA ENERGY',  ubicacion:'Campo Quifa',     supervisor_id:1,supervisor_nombre:'Carlos Méndez Ruíz',inspector_id:3,inspector_nombre:'Luis Torres Pérez',  fecha_inicio:'2025-03-01',fecha_fin:'2025-03-30',estado:'EN CURSO',   descripcion:'END en recipientes a presión. Alcance 8 recipientes.',observaciones:'Acceso restringido martes.'},
+    {id:3,num_ot:'OT-2025-003',contrato:'CTR-2025-C',cliente:'PERENCO COLOMBIA', ubicacion:'Bloque Capachos', supervisor_id:4,supervisor_nombre:'María Rodríguez V.', inspector_id:2,inspector_nombre:'Ana García López', fecha_inicio:'2025-04-10',fecha_fin:'2025-05-15',estado:'PENDIENTE',  descripcion:'Rastreo PCM y medición espesores puntos críticos RBI.',observaciones:''},
+    {id:4,num_ot:'OT-2025-004',contrato:'CTR-2025-D',cliente:'AMERISUR RESOURCES',ubicacion:'Putumayo',       supervisor_id:4,supervisor_nombre:'María Rodríguez V.', inspector_id:3,inspector_nombre:'Luis Torres Pérez',  fecha_inicio:'2025-02-01',fecha_fin:'2025-02-28',estado:'COMPLETADA', descripcion:'Inspección VT tanques API 653.',observaciones:''}
+  ];
+  setTimeout(function() {
+    if (fn==='validarUsuario') {
+      var u=args[0], p=args[1];
+      var found=null;
+      if(u==='admin'    && p==='admin123') found=MU[4];
+      if(u==='carlos.m' && p==='sup123')   found=MU[0];
+      if(u==='ana.g'    && p==='insp123')  found=MU[1];
+      if(u==='maria.r'  && p==='sup123')   found=MU[3];
+      if(u==='luis.t'   && p==='insp123')  found=MU[2];
+      return cb(found ? {ok:true,user:found} : {ok:false});
+    }
+    if(fn==='getUsuarios') return cb(MU);
+    if(fn==='createUsuario'||fn==='updateUsuario'||fn==='deleteUsuario') return cb({ok:true});
+    if(fn==='getOTs') {
+      var uid=args[0],rol=args[1];
+      var lista=MOT;
+      if(rol==='SUPERVISOR') lista=MOT.filter(function(o){return o.supervisor_id===uid;});
+      if(rol==='INSPECTOR')  lista=MOT.filter(function(o){return o.inspector_id===uid;});
+      return cb(lista);
+    }
+    if(fn==='createOT'||fn==='updateOT') return cb({ok:true});
+    if(fn==='getReportes') return cb([
+      {id:1,num_ot:'OT-2025-001',nombre:'Reporte Final UT Campo Rubiales',generado_por_nombre:'Carlos Méndez Ruíz',fecha_generacion:'2025-03-01 09:15'}
+    ]);
+    if(fn==='generarReporte') return cb({ok:true});
+    if(fn==='cambiarContrasena') return cb({ok:true});
+    if(fn==='getIndicadores') {
+      var uid2=args[0],rol2=args[1];
+      var mis=MOT, comp=0,enc=0,pend=0;
+      if(rol2==='SUPERVISOR') mis=MOT.filter(function(o){return o.supervisor_id===uid2;});
+      if(rol2==='INSPECTOR')  mis=MOT.filter(function(o){return o.inspector_id===uid2;});
+      comp=mis.filter(function(o){return o.estado==='COMPLETADA';}).length;
+      enc =mis.filter(function(o){return o.estado==='EN CURSO';}).length;
+      pend=mis.filter(function(o){return o.estado==='PENDIENTE';}).length;
+      return cb({
+        misOTs:mis.length, otsEnCurso:enc, otsCompletadas:comp, misReportes:1,
+        totalSupervisores:2, totalInspectores:2, otsActivas:enc+pend, totalReportes:1,
+        otsPendientes:MOT.filter(function(o){return o.estado==='PENDIENTE';}).length,
+        otsEnCurso:MOT.filter(function(o){return o.estado==='EN CURSO';}).length,
+        otsCompletadas:MOT.filter(function(o){return o.estado==='COMPLETADA';}).length,
+        otsCanceladas:0, otsRecientes:mis.slice(0,5),
+        indicadoresSupervisores:[
+          {id:1,nombre:'Carlos Méndez Ruíz',completadas:1,en_curso:1,pendientes:0},
+          {id:4,nombre:'María Rodríguez V.', completadas:1,en_curso:0,pendientes:1}
+        ],
+        indicadoresInspectores:[
+          {id:2,nombre:'Ana García López',cargo:'Inspector de Integridad',total_ots:2},
+          {id:3,nombre:'Luis Torres Pérez',cargo:'Inspector END',total_ots:2}
+        ]
+      });
+    }
+    cb(null);
+  }, 250);
+}
+
+// ══════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', function() {
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+  ['li-user','li-pass'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
+  });
+});
+</script>
+</body>
+</html>

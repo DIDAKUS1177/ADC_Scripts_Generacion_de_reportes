@@ -1,0 +1,105 @@
+// ==========================================
+// CÓDIGO COMPLETO PARA SACAR EL T NOMINAL
+// ==========================================
+
+/* 
+  1. LA DATA DEL ESTÁNDAR B36
+  Primero, la aplicación consume un sheet público que contiene las tablas B36.
+  Guarda esta información en una variable de estado.
+*/
+
+// Ejemplo básico en React
+// const [b36Data, setB36Data] = useState<any[][]>([]);
+
+/* 
+  Esta función asume que b36Data es un arreglo bidimensional resultante 
+  de leer la pestaña "B36" (por ejemplo: Google Sheets exportado a JSON/CSV).
+  [ 
+    ["Diametro(NPS)", "Diametro(in)", "SCH10", "SCH20", ...], 
+    ["1/2", "0.84", "0.083", "0.109", ...],
+    ... 
+  ]
+*/
+
+const calculateTNominal = (dia: string, meds: string[]) => {
+  // Si no hay diámetro seleccionado o no hay data B36, retorna vacío
+  if (!dia || b36Data.length < 2) return "";
+
+  let diaRow: any = null;
+  
+  // Buscar la fila correspondiente al diámetro (ignorando headers)
+  for (let r of b36Data.slice(1)) {
+    // Si el texto de la columna 1 o 2 coincide con el diámetro
+    if (r[0] == dia || r[1] == dia) {
+      diaRow = r;
+      break;
+    }
+  }
+  
+  // Si no encuentra el diámetro en la tabla, retorna vacío
+  if (!diaRow) return "";
+
+  // Extraer todos los valores numéricos válidos (espesores posibles) en esa fila
+  const thicknesses = diaRow
+    .map((v: any) => parseFloat(v?.toString().replace(',', '.')))
+    .filter((v: number) => !isNaN(v) && v > 0);
+
+  // Si no hay espesores configurados, retorna vacío
+  if (thicknesses.length === 0) return "";
+
+  // Filtrar las medidas tomadas válidas y convertirlas a número
+  const validMeds = meds
+    .map(m => parseFloat(m?.toString().replace(',', '.')))
+    .filter(m => !isNaN(m) && m > 0);
+
+  // Si no hay medidas registradas, aún no se puede calcular el T Nominal
+  if (validMeds.length === 0) return "";
+
+  // Obtener la medida MÁXIMA de las registradas en el CML
+  const maxMed = Math.max(...validMeds);
+
+  // Ordenar los espesores de la tabla de menor a mayor
+  thicknesses.sort((a: number, b: number) => a - b);
+
+  // Buscar cuál de los espesores teóricos (thicknesses) es el MÁS CERCANO a la medida MÁXIMA
+  const closest = thicknesses.reduce((prev: number, curr: number) => {
+    return (Math.abs(curr - maxMed) < Math.abs(prev - maxMed) ? curr : prev);
+  });
+
+  // Retornar el valor más cercano como un string
+  return closest.toString();
+};
+
+/*
+  2. ¿CÓMO SE EJECUTA ESTO AUTOMÁTICAMENTE?
+  Se ejecuta en cada cambio de "diametro" o cuando el usuario ingresa medidas ("meds").
+*/
+
+/*
+const handleRowChange = (id: string, field: string, value: string, medIndex?: number) => {
+  setUploadData(prev => prev.map(row => {
+    if (row.id !== id) return row;
+    
+    let updatedRow = { ...row };
+    
+    // Asignar el nuevo valor según si es una medida del array o un campo plano
+    if (field === 'meds' && medIndex !== undefined) {
+      const newMeds = [...row.meds];
+      newMeds[medIndex] = value;
+      updatedRow.meds = newMeds;
+    } else {
+      updatedRow = { ...row, [field]: value };
+    }
+    
+    // Si cambió el diámetro o cambiaron las medidas, recalculamos el T_Nominal
+    if (field === 'diametro' || field === 'meds') {
+      if (updatedRow.diametro) {
+        const newTNom = calculateTNominal(updatedRow.diametro, updatedRow.meds);
+        if (newTNom) updatedRow.t_nominal = newTNom;
+      }
+    }
+    
+    return updatedRow;
+  }));
+};
+*/

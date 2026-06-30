@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor PT - Ademincol</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8f9fa;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body class="flex flex-col h-screen text-slate-900 bg-white">
+
+    <!-- HEADER -->
+    <header class="bg-white border-b-4 border-red-600 sticky top-0 z-30 shadow-sm">
+        <div class="container mx-auto px-6 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-2">
+                <div class="flex flex-col leading-none">
+                    <div class="flex items-baseline gap-1">
+                        <span class="text-3xl font-black italic tracking-tighter text-black">ADEMINCOL</span>
+                        <span class="text-xs align-top -mt-2 text-red-600 font-bold">PT</span>
+                    </div>
+                    <span class="text-[10px] font-bold text-slate-500 tracking-widest uppercase mt-1">TINTES
+                        PENETRANTES</span>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <button onclick="recargarDatos()" class="p-2 text-slate-400 hover:text-red-600 transition-colors"
+                    title="Actualizar Datos">
+                    <i data-lucide="refresh-cw" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN -->
+    <main class="flex-1 container mx-auto max-w-[95%] p-6 pb-24 overflow-y-auto">
+
+        <!-- BUSCADOR -->
+        <div class="flex justify-between items-end mb-4 fade-in">
+            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <span class="w-2 h-6 bg-red-600 rounded-sm"></span>Registros PT
+            </h2>
+            <div class="relative w-64">
+                <i data-lucide="search" class="absolute left-3 top-2.5 w-4 h-4 text-slate-400"></i>
+                <input type="text" id="searchInput" placeholder="Buscar ID, Cliente, Contrato..."
+                    class="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-red-500 shadow-sm"
+                    onkeyup="filtrarTabla()">
+            </div>
+        </div>
+
+        <!-- TABLA -->
+        <div class="bg-white rounded shadow-sm border border-slate-200 overflow-hidden fade-in overflow-x-auto">
+            <table class="w-full text-left border-collapse min-w-[800px]">
+                <thead>
+                    <tr
+                        class="bg-slate-100 border-b-2 border-slate-200 text-xs font-bold text-slate-600 uppercase tracking-wider">
+                        <th class="px-4 py-4 w-20">ID</th>
+                        <th class="px-4 py-4">Cliente</th>
+                        <th class="px-4 py-4">Contrato</th>
+                        <th class="px-4 py-4 w-28 text-center">Fecha</th>
+                        <th class="px-4 py-4">Sistema</th>
+                        <th class="px-4 py-4 text-center">N° Reporte</th>
+                        <th class="px-4 py-4 text-right">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="tabla-cuerpo" class="divide-y divide-slate-100 text-sm text-slate-600 font-medium">
+                    <!-- CARGANDO -->
+                    <tr>
+                        <td colspan="7" class="p-10 text-center">
+                            <div
+                                class="inline-block animate-spin w-8 h-8 border-4 border-slate-200 border-t-red-600 rounded-full">
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+    <!-- LOADING OVERLAY -->
+    <div id="loading-global"
+        class="fixed inset-0 bg-white/95 z-[60] hidden flex-col items-center justify-center fade-in">
+        <div class="flex flex-col items-center">
+            <div class="w-12 h-12 border-4 border-slate-200 border-t-red-600 rounded-full animate-spin mb-4"></div>
+            <h2 class="text-lg font-black text-slate-900 uppercase tracking-widest">Generando Reporte</h2>
+            <p class="text-xs text-slate-500 mt-1">Creando archivo Excel y guardando en Drive...</p>
+        </div>
+    </div>
+
+    <script>
+        let allData = [];
+
+        // --- MOCK LOCAL (Para pruebas sin Google Apps Script) ---
+        if (typeof google === 'undefined') {
+            console.warn("Modo Local: Usando Mock");
+            window.google = {
+                script: {
+                    run: {
+                        withSuccessHandler: function (cb) { this.cb = cb; return this; },
+                        withFailureHandler: function (err) { this.err = err; return this; },
+                        obtenerDatosFront: function () {
+                            setTimeout(() => this.cb([
+                                { id_general: "101", cliente: "ECOPETROL", contrato: "CTR-2024", fecha: "12/12/2024", sistema: "OLEODUCTO", reporte_n: "PT-001", urlReporte: null },
+                                { id_general: "102", cliente: "CENIT", contrato: "CTR-9999", fecha: "13/12/2024", sistema: "ESTACION", reporte_n: "PT-002", urlReporte: "#" }
+                            ]), 800);
+                        },
+                        generarReporteWeb: function (id) { setTimeout(() => this.cb({ success: true, nombre: "Reportes PT_MOCK_123.xlsx", url: "#" }), 2000); }
+                    }
+                }
+            };
+        }
+
+        window.onload = () => {
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+            recargarDatos();
+        };
+
+        function recargarDatos() {
+            document.getElementById('tabla-cuerpo').innerHTML = '<tr><td colspan="7" class="p-10 text-center"><div class="inline-block animate-spin w-8 h-8 border-4 border-slate-200 border-t-red-600 rounded-full"></div></td></tr>';
+            google.script.run.withSuccessHandler(render).withFailureHandler(errorCritico).obtenerDatosFront();
+        }
+
+        function render(data) {
+            allData = data;
+            pintarTabla(data);
+        }
+
+        function pintarTabla(datos) {
+            const t = document.getElementById('tabla-cuerpo');
+            t.innerHTML = '';
+
+            if (datos.length === 0) {
+                t.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-slate-400 text-xs uppercase font-bold">No hay registros</td></tr>';
+                return;
+            }
+
+            datos.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 border-b border-slate-100 group transition-colors";
+
+                // Botones de acción
+                let accionesHtml = '';
+                if (item.urlReporte) {
+                    accionesHtml = `
+                        <div class="flex justify-end gap-2 items-center">
+                            <a href="${item.urlReporte}" target="_blank" class="px-2 py-1 bg-green-50 border border-green-200 text-green-700 text-[10px] font-bold rounded hover:bg-green-100 flex items-center gap-1">
+                                <i data-lucide="download" class="w-3 h-3"></i> XLSX
+                            </a>
+                            <button onclick="generar('${item.id_general}', true)" class="text-slate-300 hover:text-slate-500" title="Regenerar">
+                                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    accionesHtml = `
+                        <button onclick="generar('${item.id_general}')" class="px-3 py-1 bg-red-600 text-white text-[10px] font-bold rounded hover:bg-red-700 flex items-center gap-1 shadow-sm ml-auto">
+                            <i data-lucide="zap" class="w-3 h-3"></i> Generar
+                        </button>
+                    `;
+                }
+
+                // Renderizado de fila con las columnas solicitadas
+                tr.innerHTML = `
+                    <td class="px-4 py-4 font-mono text-xs text-slate-400 font-bold">${item.id_general}</td>
+                    <td class="px-4 py-4 font-bold text-slate-800">${item.cliente}</td>
+                    <td class="px-4 py-4 text-slate-600 text-xs">${item.contrato}</td>
+                    <td class="px-4 py-4 text-center text-xs text-slate-500">${item.fecha}</td>
+                    <td class="px-4 py-4 text-slate-600 text-xs">${item.sistema}</td>
+                    <td class="px-4 py-4 text-center font-mono text-xs text-slate-500 bg-slate-50">${item.reporte_n}</td>
+                    <td class="px-4 py-4 text-right">${accionesHtml}</td>
+                `;
+                t.appendChild(tr);
+            });
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        function filtrarTabla() {
+            const term = document.getElementById('searchInput').value.toLowerCase();
+            const filtrados = allData.filter(item =>
+                String(item.id_general).toLowerCase().includes(term) ||
+                String(item.cliente).toLowerCase().includes(term) ||
+                String(item.contrato).toLowerCase().includes(term) ||
+                String(item.reporte_n).toLowerCase().includes(term) ||
+                String(item.sistema).toLowerCase().includes(term)
+            );
+            pintarTabla(filtrados);
+        }
+
+        function generar(id, confirmar = false) {
+            if (confirmar && !confirm("¿Deseas generar una nueva versión de este reporte?")) return;
+            loader(true);
+            google.script.run.withSuccessHandler((res) => {
+                loader(false);
+                if (res.success) {
+                    alert("✅ Reporte guardado:\n" + res.nombre);
+                    // Actualizar URL localmente para habilitar botón descarga inmediato
+                    const idx = allData.findIndex(x => x.id_general == id);
+                    if (idx !== -1) {
+                        allData[idx].urlReporte = res.url;
+                        pintarTabla(allData);
+                    }
+                } else {
+                    alert("❌ Error: " + res.error);
+                }
+            }).withFailureHandler(errorCritico).generarReporteWeb(id);
+        }
+
+        function loader(show) {
+            const l = document.getElementById('loading-global');
+            if (show) { l.classList.remove('hidden'); l.classList.add('flex'); }
+            else { l.classList.add('hidden'); l.classList.remove('flex'); }
+        }
+
+        function errorCritico(e) {
+            loader(false);
+            console.error(e);
+            alert("Error del sistema: " + e.message);
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UT Espesores · ADEMINCOL</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family:'Inter',sans-serif; }
+    .fade-in { animation:fadeIn .3s ease-out; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)} }
+
+    /* ── Tabla CML ── */
+    .cml-th { font-size:9px;font-weight:700;text-transform:uppercase;color:#64748b;
+               padding:7px 4px;background:#f8fafc;white-space:nowrap;
+               border-bottom:2px solid #e2e8f0; }
+    .cml-td { padding:3px 2px;border-bottom:1px solid #f1f5f9;vertical-align:middle; }
+    .cml-in { width:56px;padding:3px;font-size:11px;text-align:center;
+               border:1px solid #e2e8f0;border-radius:4px;background:#f8fafc;
+               font-family:'Courier New',monospace; }
+    .cml-in:focus { outline:none;border-color:#dc2626;background:#fff; }
+    .cml-nm { width:90px;font-size:11px;padding:3px 6px;
+               border:1px solid #e2e8f0;border-radius:4px;background:#fff; }
+    .cml-nm:focus { outline:none;border-color:#dc2626; }
+    .cml-sel { font-size:11px;padding:3px 5px;border:1px solid #e2e8f0;
+                border-radius:4px;background:#fff;max-width:170px; }
+    .cml-sel:focus { outline:none;border-color:#dc2626; }
+    .tnom { font-family:monospace;font-size:11px;font-weight:700;color:#15803d;
+             background:#f0fdf4;padding:3px 7px;border-radius:4px;
+             display:inline-block;min-width:58px;text-align:center; }
+    .tnom-in { width:70px;font-size:11px;padding:3px 5px;text-align:center;
+                border:1px solid #d97706;border-radius:4px;background:#fffbeb;
+                font-family:monospace;font-weight:700;color:#92400e; }
+    .tnom-in:focus { outline:none;border-color:#dc2626; }
+    .grp { border-left:2px solid #e2e8f0; }
+
+    /* ── Panel tabla ── */
+    .panel-tr:hover { background:#f8fafc; }
+    .badge-green  { background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0; }
+    .badge-amber  { background:#fffbeb;color:#92400e;border:1px solid #fde68a; }
+    .badge-slate  { background:#f8fafc;color:#64748b;border:1px solid #e2e8f0; }
+    .badge-blue   { background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+
+<!-- ══════════════════════ LOGIN ══════════════════════ -->
+<div id="screen-login" class="fixed inset-0 bg-white z-50 flex items-center justify-center">
+  <div class="w-full max-w-sm px-4">
+    <div class="text-center mb-8">
+      <div class="text-4xl font-black italic tracking-tighter">ADEMINCOL</div>
+      <div class="text-xs font-bold tracking-widest text-red-600 uppercase mt-1">ESPESORES UT · LECTURAS</div>
+    </div>
+    <form onsubmit="handleLogin(event)" class="bg-white border border-slate-200 rounded-xl p-8 shadow-sm">
+      <div class="mb-4">
+        <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Usuario</label>
+        <input id="l-user" type="text" autocomplete="username"
+               class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500"
+               placeholder="inspector1">
+      </div>
+      <div class="mb-5">
+        <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Contraseña</label>
+        <input id="l-pass" type="password" autocomplete="current-password"
+               class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-red-500">
+      </div>
+      <div id="l-err" class="hidden text-xs text-red-600 font-semibold mb-3 text-center bg-red-50 rounded-lg py-2"></div>
+      <button type="submit"
+              class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-lg transition-colors">
+        Ingresar
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ══════════════════════ HEADER (compartido) ══════════════════════ -->
+<header id="main-header" style="display:none"
+        class="bg-white border-b-4 border-red-600 sticky top-0 z-30 shadow-sm">
+  <div class="px-6 py-4 flex justify-between items-center flex-wrap gap-3">
+    <div class="flex flex-col leading-none">
+      <div class="flex items-baseline gap-1.5">
+        <span class="text-2xl font-black italic tracking-tighter">ADEMINCOL</span>
+        <span class="text-[10px] text-red-600 font-black">UT</span>
+      </div>
+      <span class="text-[9px] font-bold text-slate-500 tracking-widest uppercase" id="header-subtitle">
+        MEDICIÓN DE ESPESORES
+      </span>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="username-badge" class="text-xs font-bold text-slate-400"></span>
+      <button onclick="logout()" title="Salir"
+              class="p-1.5 text-slate-400 hover:text-red-600 transition-colors">
+        <i data-lucide="log-out" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════════════════ PANEL DE REPORTES ══════════════════════ -->
+<div id="screen-panel" style="display:none" class="fade-in">
+  <main class="px-4 md:px-6 py-5 max-w-[1400px] mx-auto">
+
+    <!-- Barra -->
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
+      <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+        <span class="w-2 h-5 bg-red-600 rounded-sm"></span> Registros de Inspección
+      </h2>
+      <div class="flex items-center gap-2">
+        <div class="relative">
+          <i data-lucide="search" class="absolute left-3 top-2.5 w-3.5 h-3.5 text-slate-400"></i>
+          <input id="panel-search" type="text" placeholder="Buscar ID, estación, sistema..."
+                 class="pl-9 pr-4 py-2 text-xs border border-slate-200 rounded-lg outline-none focus:border-red-400 w-56 shadow-sm"
+                 oninput="filtrarPanel()">
+        </div>
+        <button onclick="cargarPanel()"
+                class="p-2 text-slate-400 hover:text-red-600 transition-colors" title="Actualizar">
+          <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Tabla panel -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden overflow-x-auto">
+      <table class="w-full text-left border-collapse min-w-[820px]">
+        <thead>
+          <tr class="bg-slate-100 border-b-2 border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+            <th class="px-4 py-3.5 w-32">ID Reporte</th>
+            <th class="px-4 py-3.5">Estación</th>
+            <th class="px-4 py-3.5">Sistema</th>
+            <th class="px-4 py-3.5 hidden md:table-cell">Cliente</th>
+            <th class="px-4 py-3.5 hidden lg:table-cell text-center w-28">Fecha</th>
+            <th class="px-4 py-3.5 hidden lg:table-cell text-center w-24">N° Reporte</th>
+            <th class="px-4 py-3.5 text-center w-36">Estado</th>
+            <th class="px-4 py-3.5 text-right w-44">Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="panel-tbody" class="divide-y divide-slate-100 text-sm text-slate-700">
+          <tr>
+            <td colspan="8" class="p-12 text-center">
+              <div class="inline-block animate-spin w-7 h-7 border-4 border-slate-200 border-t-red-600 rounded-full"></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </main>
+</div>
+
+<!-- ══════════════════════ EDITOR DE LECTURAS ══════════════════════ -->
+<div id="screen-editor" style="display:none" class="fade-in flex flex-col min-h-[calc(100vh-73px)]">
+  <main class="flex-1 px-4 md:px-6 py-5 pb-24 max-w-[1600px] mx-auto w-full">
+
+    <!-- Contexto del registro seleccionado -->
+    <div class="mb-4 flex flex-wrap items-center gap-2">
+      <button onclick="volverPanel()"
+              class="flex items-center gap-1.5 text-xs text-slate-500 hover:text-red-600 font-semibold transition-colors">
+        <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> Panel
+      </button>
+      <span class="text-slate-200">/</span>
+      <div class="flex flex-wrap items-center gap-3 text-xs">
+        <span class="font-mono bg-slate-100 px-2.5 py-1 rounded-lg font-bold text-slate-700" id="ctx-id"></span>
+        <span id="ctx-estacion" class="text-slate-500"></span>
+        <span id="ctx-sistema"  class="text-slate-500 hidden md:block"></span>
+        <span id="ctx-cliente"  class="text-slate-400 hidden lg:block italic"></span>
+      </div>
+    </div>
+
+    <!-- Tipo de Activo -->
+    <div class="mb-4 flex items-center gap-2 flex-wrap">
+      <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Tipo de Activo:</span>
+      <div class="flex gap-1.5">
+        <button onclick="setTipo('TUBERIAS')" id="btn-tipo-TUBERIAS"
+                class="tipo-btn px-3 py-1 text-xs font-bold rounded-full border transition-colors border-red-600 bg-red-600 text-white">
+          <i data-lucide="pipe" class="w-3 h-3 inline -mt-0.5 mr-0.5"></i> Tuberías
+        </button>
+        <button onclick="setTipo('TANQUES')" id="btn-tipo-TANQUES"
+                class="tipo-btn px-3 py-1 text-xs font-bold rounded-full border transition-colors border-slate-300 text-slate-500 bg-white hover:border-red-300">
+          <i data-lucide="cylinder" class="w-3 h-3 inline -mt-0.5 mr-0.5"></i> Tanques
+        </button>
+        <button onclick="setTipo('RECIPIENTES_A_PRESION')" id="btn-tipo-RECIPIENTES_A_PRESION"
+                class="tipo-btn px-3 py-1 text-xs font-bold rounded-full border transition-colors border-slate-300 text-slate-500 bg-white hover:border-red-300">
+          <i data-lucide="circle-dashed" class="w-3 h-3 inline -mt-0.5 mr-0.5"></i> Recipientes a Presión
+        </button>
+      </div>
+      <span id="tipo-nota" class="text-[10px] text-amber-600 font-semibold hidden">
+        T. Nominal manual — ingrese el diseño o placa de datos
+      </span>
+    </div>
+
+    <!-- Barra de acciones CML -->
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <div>
+        <h2 class="text-sm font-bold text-slate-800">Puntos de Medición (CML)</h2>
+        <p class="text-xs text-slate-400 mt-0.5">
+          Medidas en mm → pulgadas automático.
+          T. Nominal se calcula desde B36 (Tuberías) o se ingresa manual (Tanques / Recipientes).
+          Elimina puntos individualmente con el botón ×.
+        </p>
+      </div>
+      <div class="flex gap-2 flex-wrap">
+        <label class="cursor-pointer flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200
+                       hover:border-red-300 text-slate-600 hover:text-red-600 text-xs font-semibold rounded-lg transition-colors">
+          <i data-lucide="file-up" class="w-3.5 h-3.5"></i> CSV / XLS
+          <input type="file" class="hidden" accept=".csv,.xlsx,.xls" onchange="parsearArchivo(this)">
+        </label>
+        <button onclick="agregarFila()"
+                class="flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i> Agregar CML
+        </button>
+      </div>
+    </div>
+
+    <!-- Estado vacío -->
+    <div id="tbl-empty" class="py-14 text-center text-slate-300">
+      <i data-lucide="table-2" class="w-12 h-12 mx-auto mb-3"></i>
+      <p class="text-sm font-semibold text-slate-400">Sin lecturas todavía</p>
+      <p class="text-xs text-slate-400 mt-1">Carga un CSV/XLS o agrega filas manualmente</p>
+    </div>
+
+    <!-- Tabla CML -->
+    <div id="tbl-wrap" style="display:none"
+         class="overflow-x-auto rounded-xl border border-slate-200 shadow-sm bg-white fade-in">
+      <table class="text-left border-collapse w-max min-w-full">
+        <thead>
+          <tr class="bg-slate-50">
+            <th class="cml-th pl-3 w-7">#</th>
+            <th class="cml-th">CML / Punto</th>
+            <th class="cml-th">Componente</th>
+            <th class="cml-th" id="th-nps">NPS</th>
+            <th class="cml-th text-green-700 text-center">T. Nom.</th>
+            <th class="cml-th text-center">M01</th>
+            <th class="cml-th text-center">M02</th>
+            <th class="cml-th text-center">M03</th>
+            <th class="cml-th text-center">M04</th>
+            <th class="cml-th text-center grp">M05</th>
+            <th class="cml-th text-center">M06</th>
+            <th class="cml-th text-center">M07</th>
+            <th class="cml-th text-center">M08</th>
+            <th class="cml-th text-center grp">M09</th>
+            <th class="cml-th text-center">M10</th>
+            <th class="cml-th text-center">M11</th>
+            <th class="cml-th text-center">M12</th>
+            <th class="cml-th text-center grp">M13</th>
+            <th class="cml-th text-center">M14</th>
+            <th class="cml-th text-center">M15</th>
+            <th class="cml-th text-center">M16</th>
+            <th class="cml-th">Obs.</th>
+            <th class="cml-th pr-3"></th>
+          </tr>
+        </thead>
+        <tbody id="cml-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Resumen -->
+    <div id="resumen" style="display:none" class="mt-3 flex gap-4 text-xs text-slate-500 fade-in">
+      <span id="res-total"></span>
+      <span id="res-sin-tnom" class="font-semibold"></span>
+    </div>
+
+  </main>
+
+  <!-- BOTTOM BAR -->
+  <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 py-3 px-6 z-20 shadow-[0_-2px_8px_rgba(0,0,0,.06)]">
+    <div class="max-w-[1600px] mx-auto flex justify-between items-center">
+      <span id="save-status" class="text-xs text-slate-400 italic"></span>
+      <div class="flex gap-2">
+        <button onclick="limpiarTabla()"
+                class="flex items-center gap-1.5 px-4 py-2 border border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-500 rounded-lg font-semibold text-sm transition-colors">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Limpiar
+        </button>
+        <button onclick="guardarLecturas()"
+                class="flex items-center gap-2 px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold text-sm transition-colors">
+          <i data-lucide="save" class="w-4 h-4"></i> Guardar Lecturas
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LOADING OVERLAY -->
+<div id="loading-global" class="fixed inset-0 bg-white/95 z-[60] hidden flex-col items-center justify-center">
+  <div class="flex flex-col items-center text-center">
+    <div class="w-12 h-12 border-4 border-slate-200 border-t-red-600 rounded-full animate-spin mb-4"></div>
+    <h2 id="loading-msg" class="text-lg font-black text-slate-900 uppercase tracking-widest">Procesando…</h2>
+    <p class="text-xs text-slate-400 mt-1">Por favor espere</p>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" style="display:none"
+     class="fixed bottom-20 left-1/2 -translate-x-1/2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg z-[70]"></div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+// ESTADO GLOBAL
+// ══════════════════════════════════════════════════════════
+var ST = {
+  user:          null,
+  b36:           [],
+  catalogos:     { TUBERIAS:{complementos:[],diametros:[]}, TANQUES:{complementos:[],diametros:[]}, RECIPIENTES_A_PRESION:{complementos:[],diametros:[]} },
+  tipoActivo:    'TUBERIAS',
+  panelData:     [],
+  currentRecord: null
+};
+
+// ══════════════════════════════════════════════════════════
+// NAVEGACIÓN ENTRE PANTALLAS
+// ══════════════════════════════════════════════════════════
+function showScreen(name) {
+  ['login','panel','editor'].forEach(function(s) {
+    document.getElementById('screen-' + s).style.display = 'none';
+  });
+  document.getElementById('screen-' + name).style.display = 'block';
+  var hdr = document.getElementById('main-header');
+  hdr.style.display = name === 'login' ? 'none' : 'block';
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+// ══════════════════════════════════════════════════════════
+// LOGIN
+// ══════════════════════════════════════════════════════════
+function handleLogin(e) {
+  e.preventDefault();
+  var u   = document.getElementById('l-user').value.trim();
+  var p   = document.getElementById('l-pass').value;
+  var err = document.getElementById('l-err');
+  err.classList.add('hidden');
+
+  callGAS('validarUsuario', [u, p], function(res) {
+    if (res && res.ok) {
+      ST.user = res.username;
+      document.getElementById('username-badge').textContent = ST.user;
+      document.getElementById('header-subtitle').textContent = 'MEDICIÓN DE ESPESORES';
+      showScreen('panel');
+      initCatalogos();
+      cargarPanel();
+    } else {
+      err.textContent = 'Usuario o contraseña incorrectos.';
+      err.classList.remove('hidden');
+    }
+  }, function() {
+    err.textContent = 'Error de conexión.';
+    err.classList.remove('hidden');
+  });
+}
+
+function logout() {
+  ST.user = null; ST.currentRecord = null;
+  document.getElementById('l-pass').value = '';
+  showScreen('login');
+}
+
+// ══════════════════════════════════════════════════════════
+// CATÁLOGOS
+// ══════════════════════════════════════════════════════════
+function initCatalogos() {
+  callGAS('getDatosFormulario', [], function(data) {
+    ST.catalogos = data.catalogos || ST.catalogos;
+    ST.b36       = data.b36       || [];
+    // Recalcular T. Nominal en todas las filas del editor si ya estaba abierto
+    Array.from(document.querySelectorAll('#cml-tbody tr')).forEach(function(tr) {
+      if (tr.id) recalc(tr.id);
+    });
+  }, function() {
+    showToast('No se pudo cargar el catálogo. Usando valores por defecto.', 'warn');
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// PANEL — LISTAR REPORTES
+// ══════════════════════════════════════════════════════════
+function cargarPanel() {
+  document.getElementById('panel-tbody').innerHTML =
+    '<tr><td colspan="8" class="p-12 text-center">' +
+    '<div class="inline-block animate-spin w-7 h-7 border-4 border-slate-200 border-t-red-600 rounded-full"></div></td></tr>';
+
+  callGAS('getReportesExistentes', [], function(data) {
+    ST.panelData = data || [];
+    pintarPanel(ST.panelData);
+  }, function(err) {
+    document.getElementById('panel-tbody').innerHTML =
+      '<tr><td colspan="8" class="p-8 text-center text-red-500 text-xs font-semibold">Error al cargar: ' + err.message + '</td></tr>';
+  });
+}
+
+function pintarPanel(datos) {
+  var tbody = document.getElementById('panel-tbody');
+  if (!datos.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="p-10 text-center text-xs text-slate-400 font-semibold uppercase">Sin registros encontrados</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '';
+  datos.forEach(function(rec) {
+    var estado = estadoBadge(rec);
+    var tr = document.createElement('tr');
+    tr.className = 'panel-tr border-b border-slate-100 text-sm';
+    tr.innerHTML =
+      '<td class="px-4 py-3.5 font-mono text-xs font-bold text-slate-700">' + esc(rec.id_general) + '</td>' +
+      '<td class="px-4 py-3.5 font-semibold text-slate-800">' + esc(rec.estacion || '—') + '</td>' +
+      '<td class="px-4 py-3.5 text-slate-500 text-xs">' + esc(rec.sistema  || '—') + '</td>' +
+      '<td class="px-4 py-3.5 text-slate-400 text-xs hidden md:table-cell">' + esc(rec.cliente || '—') + '</td>' +
+      '<td class="px-4 py-3.5 text-center text-xs text-slate-400 hidden lg:table-cell">' + esc(rec.fecha || '—') + '</td>' +
+      '<td class="px-4 py-3.5 text-center font-mono text-xs text-slate-400 hidden lg:table-cell">' + esc(rec.num_reporte || '—') + '</td>' +
+      '<td class="px-4 py-3.5 text-center"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold ' + estado.cls + '">' + estado.label + '</span></td>' +
+      '<td class="px-4 py-3.5 text-right">' + accionesPanelHtml(rec) + '</td>';
+    tbody.appendChild(tr);
+  });
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function estadoBadge(rec) {
+  if (rec.urlReporte) return { cls:'badge-blue',  label:'Reporte listo' };
+  if (rec.has_lecturas)  return { cls:'badge-amber', label:'Con lecturas'  };
+  return                        { cls:'badge-slate', label:'Sin lecturas'  };
+}
+
+function accionesPanelHtml(rec) {
+  var id   = esc(rec.id_general);
+  var html = '<div class="flex justify-end gap-1.5 items-center">';
+
+  // Botón descargar XLSX solo si ya existe reporte
+  if (rec.urlReporte && rec.urlReporte !== '#local') {
+    html += '<a href="' + esc(rec.urlReporte) + '" target="_blank" ' +
+            'class="px-2 py-1 bg-green-50 border border-green-200 text-green-700 text-[10px] font-bold rounded hover:bg-green-100 flex items-center gap-1">' +
+            '<i data-lucide="download" class="w-3 h-3"></i> XLSX</a>';
+  }
+
+  // Botón Lecturas — abre el editor CML
+  html += '<button onclick="abrirEditor(\'' + id + '\')" ' +
+          'class="px-2.5 py-1 bg-red-50 border border-red-200 text-red-700 text-[10px] font-bold rounded hover:bg-red-100 flex items-center gap-1">' +
+          '<i data-lucide="edit-3" class="w-3 h-3"></i> Lecturas</button>';
+
+  html += '</div>';
+  return html;
+}
+
+function filtrarPanel() {
+  var term = document.getElementById('panel-search').value.toLowerCase();
+  pintarPanel(ST.panelData.filter(function(r) {
+    return !term ||
+      r.id_general.toLowerCase().includes(term) ||
+      (r.estacion  ||'').toLowerCase().includes(term) ||
+      (r.sistema   ||'').toLowerCase().includes(term) ||
+      (r.cliente   ||'').toLowerCase().includes(term) ||
+      (r.num_reporte||'').toLowerCase().includes(term);
+  }));
+}
+
+// ══════════════════════════════════════════════════════════
+// PANEL — GENERAR REPORTE DIRECTO
+// ══════════════════════════════════════════════════════════
+function generarDesdePanel(idGeneral) {
+  var rec = ST.panelData.find(function(r){ return r.id_general === idGeneral; });
+  if (!rec) return;
+  if (!confirm('¿Generar reporte para "' + idGeneral + '"?\nEsto usará los datos y lecturas guardados.')) return;
+  _ejecutarGenerar(idGeneral);
+}
+
+function _ejecutarGenerar(idGeneral) {
+  loader(true, 'Generando reporte Excel…');
+
+  // Localmente el endpoint devuelve la URL de descarga directa
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    fetch('/generar/' + encodeURIComponent(idGeneral), { method: 'POST' })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(e){ throw new Error(e.error || r.statusText); });
+        // El servidor devuelve el XLSX como binario — lo descargamos
+        return r.blob();
+      })
+      .then(function(blob) {
+        loader(false);
+        var url = URL.createObjectURL(blob);
+        var a   = document.createElement('a');
+        a.href     = url;
+        a.download = 'Reporte_' + idGeneral + '.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('Reporte descargado correctamente.', 'success');
+        var idx = ST.panelData.findIndex(function(r){ return r.id_general === idGeneral; });
+        if (idx >= 0) { ST.panelData[idx].urlReporte = '#local'; pintarPanel(ST.panelData); }
+      })
+      .catch(function(e){ loader(false); showToast('Error generando: ' + e.message, 'error'); });
+    return;
+  }
+
+  callGAS('generarReporte', [idGeneral], function(res) {
+    loader(false);
+    if (res && res.success) {
+      showToast('Reporte listo. Descargando…', 'success');
+      var idx = ST.panelData.findIndex(function(r){ return r.id_general === idGeneral; });
+      if (idx >= 0) { ST.panelData[idx].urlReporte = res.url; pintarPanel(ST.panelData); }
+      setTimeout(function(){ window.open(res.url, '_blank'); }, 400);
+    } else {
+      showToast('Error: ' + (res ? res.error : '?'), 'error');
+    }
+  }, function(err){ loader(false); showToast('Error: ' + err.message, 'error'); });
+}
+
+// ══════════════════════════════════════════════════════════
+// EDITOR — ABRIR / CERRAR
+// ══════════════════════════════════════════════════════════
+function abrirEditor(idGeneral) {
+  var rec = ST.panelData.find(function(r){ return r.id_general === idGeneral; });
+  if (!rec) { showToast('Registro no encontrado.', 'error'); return; }
+  ST.currentRecord = rec;
+  document.getElementById('ctx-id').textContent       = rec.id_general;
+  document.getElementById('ctx-estacion').textContent = rec.estacion || '';
+  document.getElementById('ctx-sistema').textContent  = rec.sistema  || '';
+  document.getElementById('ctx-cliente').textContent  = rec.cliente  || '';
+  document.getElementById('save-status').textContent  = '';
+
+  // Limpiar tabla antes de abrir
+  document.getElementById('cml-tbody').innerHTML = '';
+  actualizarVacio();
+
+  showScreen('editor');
+  setTipo('TUBERIAS');  // reset tipo
+
+  // Cargar lecturas existentes si las hay
+  if (rec.has_lecturas) {
+    loader(true, 'Cargando lecturas guardadas…');
+    callGAS('getLecturasPorId', [rec.id_general], function(rows) {
+      loader(false);
+      if (rows && rows.length) {
+        rows.forEach(function(row) {
+          agregarFila({
+            cml:        row['CML']  || row['cml']  || '',
+            componente: row['componente']     || '',
+            diametro:   row['diametro']       || '',
+            t_nominal:  row['t_nominal']      || '',
+            obs:        row['observaciones']  || '',
+            meds: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16].map(function(n){
+              return String(row['med' + n] || '');
+            })
+          });
+        });
+        actualizarVacio();
+        showToast(rows.length + ' lecturas cargadas.', 'success');
+      }
+    }, function(err){ loader(false); showToast('Error cargando lecturas: ' + err.message, 'error'); });
+  }
+}
+
+function volverPanel() {
+  document.getElementById('cml-tbody').innerHTML = '';
+  actualizarVacio();
+  ST.currentRecord = null;
+  showScreen('panel');
+}
+
+// ══════════════════════════════════════════════════════════
+// TIPO DE ACTIVO
+// ══════════════════════════════════════════════════════════
+function setTipo(tipo) {
+  ST.tipoActivo = tipo;
+  // Actualizar botones
+  document.querySelectorAll('.tipo-btn').forEach(function(btn) {
+    btn.className = btn.className
+      .replace(/border-red-600 bg-red-600 text-white/g, 'border-slate-300 text-slate-500 bg-white hover:border-red-300')
+      .replace(/border-slate-300 text-slate-500 bg-white hover:border-red-300/g, 'border-slate-300 text-slate-500 bg-white hover:border-red-300');
+  });
+  var activoBtn = document.getElementById('btn-tipo-' + tipo);
+  if (activoBtn) activoBtn.className = activoBtn.className
+    .replace('border-slate-300 text-slate-500 bg-white hover:border-red-300', 'border-red-600 bg-red-600 text-white');
+
+  // Nota de T. Nominal manual
+  var esTuberia = tipo === 'TUBERIAS';
+  document.getElementById('tipo-nota').classList.toggle('hidden', esTuberia);
+  document.getElementById('th-nps').textContent = tipo === 'TANQUES' ? 'Diám. Nominal' : 'NPS';
+
+  // Actualizar selects de componente/diámetro en filas existentes
+  document.querySelectorAll('#cml-tbody tr').forEach(function(tr) {
+    var rid = tr.id;
+    var compVal = tr.querySelector('.comp-sel') ? tr.querySelector('.comp-sel').value : '';
+    var npsVal  = tr.querySelector('.nps-sel')  ? tr.querySelector('.nps-sel').value  : '';
+    if (tr.querySelector('.comp-sel')) tr.querySelector('.comp-sel').innerHTML = compOpts(compVal);
+    if (tr.querySelector('.nps-sel'))  tr.querySelector('.nps-sel').innerHTML  = npsOpts(npsVal);
+    renderTnom(rid);
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// TABLA CML — SELECTORES
+// ══════════════════════════════════════════════════════════
+function compOpts(sel) {
+  var cat = ST.catalogos[ST.tipoActivo] || ST.catalogos.TUBERIAS;
+  var o   = '<option value="">-- Componente --</option>';
+  cat.complementos.forEach(function(c) {
+    o += '<option' + (c === sel ? ' selected' : '') + '>' + esc(c) + '</option>';
+  });
+  return o;
+}
+function npsOpts(sel) {
+  var cat = ST.catalogos[ST.tipoActivo] || ST.catalogos.TUBERIAS;
+  var o   = '<option value="">-- NPS / Diám. --</option>';
+  cat.diametros.forEach(function(d) {
+    o += '<option' + (d === sel ? ' selected' : '') + '>' + esc(d) + '</option>';
+  });
+  return o;
+}
+
+// ══════════════════════════════════════════════════════════
+// TABLA CML — AGREGAR FILA
+// ══════════════════════════════════════════════════════════
+function agregarFila(data) {
+  data = data || {};
+  var tbody  = document.getElementById('cml-tbody');
+  var rowNum = tbody.rows.length + 1;
+  var rid    = 'r' + Date.now() + Math.floor(Math.random() * 9999);
+  var meds   = Array.isArray(data.meds) ? data.meds : [];
+  var esTub  = ST.tipoActivo === 'TUBERIAS';
+
+  var medsHtml = '';
+  for (var i = 0; i < 16; i++) {
+    var cls = (i === 4 || i === 8 || i === 12) ? 'cml-td grp' : 'cml-td';
+    medsHtml += '<td class="' + cls + '">' +
+      '<input type="number" step="0.0001" min="0" class="cml-in med-in" ' +
+      'value="' + esc(meds[i] || '') + '" ' +
+      'oninput="recalc(\'' + rid + '\')" placeholder="0.0000"></td>';
+  }
+
+  // T. Nominal: calculado automáticamente (solo lectura)
+  var tnomHtml = '<span class="tnom tval">—</span>';
+
+  var tr = document.createElement('tr');
+  tr.id = rid;
+  tr.className = 'hover:bg-slate-50 border-b border-slate-100 group';
+  tr.innerHTML =
+    '<td class="cml-td pl-3 text-xs text-slate-400 font-mono rnum">' + rowNum + '</td>' +
+    '<td class="cml-td"><input type="text" class="cml-nm cml-name" placeholder="CML-01" value="' + esc(data.cml || '') + '"></td>' +
+    '<td class="cml-td"><select class="cml-sel comp-sel" style="min-width:150px" onchange="recalc(\'' + rid + '\')">' + compOpts(data.componente || '') + '</select></td>' +
+    '<td class="cml-td"><select class="cml-sel nps-sel" onchange="recalc(\'' + rid + '\')">' + npsOpts(data.diametro || '') + '</select></td>' +
+    '<td class="cml-td text-center">' + tnomHtml + '</td>' +
+    medsHtml +
+    '<td class="cml-td"><input type="text" class="cml-in obs-in" style="width:80px" placeholder="Obs..." value="' + esc(data.obs || '') + '"></td>' +
+    '<td class="cml-td pr-3">' +
+      '<button onclick="eliminarFila(\'' + rid + '\')" ' +
+        'class="text-slate-200 group-hover:text-slate-400 hover:!text-red-500 transition-colors" title="Eliminar este punto">' +
+        '<i data-lucide="x" class="w-4 h-4"></i></button></td>';
+
+  tbody.appendChild(tr);
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+
+  // Calcular T. Nominal si hay diámetro y medidas (recalc verifica el tipo internamente)
+  if (data.diametro && meds.some(function(m){ return m; })) recalc(rid);
+
+  actualizarVacio();
+}
+
+function eliminarFila(rid) {
+  var tr = document.getElementById(rid);
+  if (!tr) return;
+
+  // Si ya está guardado en el Sheet, preguntar
+  var cmlNombre = tr.querySelector('.cml-name') ? tr.querySelector('.cml-name').value.trim() : '';
+  if (ST.currentRecord && cmlNombre && confirm('¿Eliminar el punto "' + cmlNombre + '" del registro guardado?')) {
+    callGAS('eliminarLecturaCML', [ST.currentRecord.id_general, cmlNombre], function(res) {
+      if (res && res.success && res.eliminadas > 0) {
+        showToast('"' + cmlNombre + '" eliminado del Sheet.', 'success');
+        // Actualizar has_lecturas en panel
+        var idx = ST.panelData.findIndex(function(r){ return r.id_general === ST.currentRecord.id_general; });
+        if (idx >= 0) {
+          var remaining = document.getElementById('cml-tbody').rows.length - 1; // -1 porque la fila aún existe
+          if (remaining <= 0) ST.panelData[idx].has_lecturas = false;
+        }
+      }
+    }, null);
+  }
+
+  tr.remove();
+  document.querySelectorAll('#cml-tbody tr').forEach(function(r, i){
+    r.querySelector('.rnum').textContent = i + 1;
+  });
+  actualizarVacio();
+}
+
+function limpiarTabla() {
+  if (!document.getElementById('cml-tbody').rows.length) return;
+  if (!confirm('¿Borrar todas las filas de la tabla?\nEsto NO borra lo guardado en la hoja.')) return;
+  document.getElementById('cml-tbody').innerHTML = '';
+  actualizarVacio();
+}
+
+function actualizarVacio() {
+  var n = document.getElementById('cml-tbody').rows.length;
+  document.getElementById('tbl-empty').style.display = n ? 'none'  : 'block';
+  document.getElementById('tbl-wrap').style.display  = n ? 'block' : 'none';
+  document.getElementById('resumen').style.display   = n ? 'flex'  : 'none';
+  if (!n) return;
+
+  document.getElementById('res-total').textContent = n + ' CML' + (n > 1 ? 's' : '');
+
+  var sinT = Array.from(document.querySelectorAll('.tval')).filter(function(s){ return s.textContent === '—'; }).length;
+  var el = document.getElementById('res-sin-tnom');
+  el.textContent = sinT
+    ? '⚠ ' + sinT + ' sin T. Nominal'
+    : '✓ Todos con T. Nominal';
+  el.className = sinT ? 'font-semibold text-amber-600' : 'font-semibold text-green-600';
+}
+
+// ══════════════════════════════════════════════════════════
+// T_NOMINAL — AUTO (Tuberías / B36)
+// ══════════════════════════════════════════════════════════
+function recalc(rid) {
+  var tr = document.getElementById(rid);
+  if (!tr) return;
+  if (ST.tipoActivo !== 'TUBERIAS') return;  // en tanques/recipientes es manual
+
+  var nps  = tr.querySelector('.nps-sel').value;
+  var meds = Array.from(tr.querySelectorAll('.med-in'))
+    .map(function(i){ return parseFloat(i.value); })
+    .filter(function(v){ return !isNaN(v) && v > 0; });
+  var span = tr.querySelector('.tval');
+  if (span) span.textContent = (nps && meds.length) ? (calcTNominal(nps, meds) || '—') : '—';
+  actualizarVacio();
+}
+
+function renderTnom(rid) {
+  var tr = document.getElementById(rid);
+  if (!tr) return;
+  var td = tr.cells[4];
+  if (!td) return;
+  // T. Nominal siempre es calculado automáticamente (nunca editable)
+  var curVal = (td.querySelector('.tval') || {textContent:'—'}).textContent;
+  td.innerHTML = '<span class="tnom tval">' + (curVal || '—') + '</span>';
+  recalc(rid);
+}
+
+function calcTNominal(nps, meds) {
+  if (!nps || !meds.length || ST.b36.length < 2) return '';
+
+  // La tabla B36 real es NORMALIZADA: una fila por NPS × Schedule.
+  // Columnas clave: NPS_in (índice 1) y t_nominal_in (índice 7).
+  // Detectar índices dinámicamente desde la fila de headers (fila 0).
+  var hdrs = ST.b36[0].map(function(h){ return String(h).trim().toLowerCase(); });
+  var iNPS = hdrs.findIndex(function(h){ return h === 'nps_in' || h === 'nps'; });
+  var iThk = hdrs.findIndex(function(h){ return h === 't_nominal_in' || h === 't_nominal'; });
+
+  var thks = [];
+
+  if (iNPS >= 0 && iThk >= 0) {
+    // Estructura normalizada (BD real): recoger t_nominal_in de todas las filas que coincidan con NPS
+    for (var r = 1; r < ST.b36.length; r++) {
+      var rowNPS = String(ST.b36[r][iNPS]).trim();
+      if (rowNPS === String(nps).trim()) {
+        var val = parseFloat(String(ST.b36[r][iThk]).replace(',','.'));
+        if (!isNaN(val) && val > 0) thks.push(val);
+      }
+    }
+  } else {
+    // Estructura matriz (mock de desarrollo): una fila por NPS, thicknesses en el resto de columnas
+    var diaRow = null;
+    for (var r = 1; r < ST.b36.length; r++) {
+      if (String(ST.b36[r][0]).trim() === nps || String(ST.b36[r][1]).trim() === nps) {
+        diaRow = ST.b36[r]; break;
+      }
+    }
+    if (diaRow) {
+      thks = diaRow.map(function(v){ return parseFloat(String(v).replace(',','.')); })
+                   .filter(function(v){ return !isNaN(v) && v > 0; });
+    }
+  }
+
+  if (!thks.length) return '';
+  var maxM = Math.max.apply(null, meds);
+  return thks.reduce(function(p, c){
+    return Math.abs(c - maxM) < Math.abs(p - maxM) ? c : p;
+  }).toFixed(4);
+}
+
+// ══════════════════════════════════════════════════════════
+// CSV / XLS PARSING
+// ══════════════════════════════════════════════════════════
+function parsearArchivo(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var wb   = XLSX.read(e.target.result, { type:'binary' });
+      var ws   = wb.Sheets[wb.SheetNames[0]];
+      var rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+      if (rows.length < 2) { showToast('Archivo vacío o sin datos.', 'error'); return; }
+
+      var hdrs  = rows[0].map(function(h){ return String(h).trim().toLowerCase(); });
+      var iCML  = hdrs.findIndex(function(h){ return h.includes('cml')||h==='punto'||h==='id'; });
+      var iComp = hdrs.findIndex(function(h){ return h.includes('comp')||h.includes('element'); });
+      var iNPS  = hdrs.findIndex(function(h){ return h==='nps'||h.includes('diam')||h.includes('nomi'); });
+      var iTNom = hdrs.findIndex(function(h){ return h.includes('t_nom')||h.includes('tnom')||h.includes('nominal'); });
+      var iObs  = hdrs.findIndex(function(h){ return h.includes('obs'); });
+
+      var medCols = [];
+      hdrs.forEach(function(h, i){
+        if (/^(m|med|medida|lectura)\s?\d{1,2}$/.test(h)) medCols.push(i);
+      });
+      if (!medCols.length) {
+        var known  = [iCML, iComp, iNPS, iTNom, iObs].filter(function(x){ return x >= 0; });
+        var start  = known.length ? Math.max.apply(null, known) + 1 : 0;
+        for (var i = start; medCols.length < 16 && i < hdrs.length; i++) medCols.push(i);
+      }
+
+      var count = 0;
+      rows.slice(1).forEach(function(row) {
+        var meds = medCols.map(function(ci) {
+          var raw = parseFloat(String(row[ci] || '').replace(',', '.'));
+          if (isNaN(raw) || raw === 0) return '';
+          return raw > 1 ? (raw / 25.4).toFixed(4) : String(raw);  // mm → pulgadas
+        });
+        if (!meds.some(function(m){ return m !== ''; })) return;
+        agregarFila({
+          cml:       iCML  >= 0 ? String(row[iCML]  || '').trim() : '',
+          componente: iComp >= 0 ? String(row[iComp] || '').trim() : '',
+          diametro:  iNPS  >= 0 ? String(row[iNPS]  || '').trim() : '',
+          t_nominal: iTNom >= 0 ? String(row[iTNom] || '').trim() : '',
+          meds:      meds,
+          obs:       iObs  >= 0 ? String(row[iObs]  || '').trim() : ''
+        });
+        count++;
+      });
+      showToast(count + ' CML(s) cargados desde "' + file.name + '"', 'success');
+    } catch(err) {
+      showToast('Error al leer: ' + err.message, 'error');
+    }
+    input.value = '';
+  };
+  reader.readAsBinaryString(file);
+}
+
+// ══════════════════════════════════════════════════════════
+// RECOLECTAR DATOS DE LA TABLA
+// ══════════════════════════════════════════════════════════
+function getCMLData() {
+  return Array.from(document.querySelectorAll('#cml-tbody tr')).map(function(tr, i) {
+    var mIns = Array.from(tr.querySelectorAll('.med-in'));
+    var span = tr.querySelector('.tval');
+    var tnom = (span && span.textContent !== '—') ? span.textContent.trim() : '';
+
+    var row = {
+      item:          String(i + 1),
+      CML:           (tr.querySelector('.cml-name') || {value:''}).value.trim(),
+      componente:    (tr.querySelector('.comp-sel')  || {value:''}).value,
+      diametro:      (tr.querySelector('.nps-sel')   || {value:''}).value,
+      t_nominal:     tnom,
+      observaciones: (tr.querySelector('.obs-in')    || {value:''}).value.trim()
+    };
+    for (var j = 0; j < 16; j++) row['med' + (j + 1)] = mIns[j] ? mIns[j].value.trim() : '';
+    return row;
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// GUARDAR LECTURAS
+// ══════════════════════════════════════════════════════════
+function guardarLecturas() {
+  if (!ST.currentRecord) { showToast('No hay registro seleccionado.', 'error'); return; }
+  var id    = ST.currentRecord.id_general;
+  var filas = getCMLData();
+  if (!filas.length) { showToast('No hay lecturas que guardar.', 'error'); return; }
+
+  loader(true, 'Guardando lecturas…');
+  callGAS('guardarLecturas', [id, filas], function(res) {
+    loader(false);
+    if (res && res.success) {
+      var ts = new Date().toLocaleTimeString('es-CO', {hour:'2-digit',minute:'2-digit'});
+      document.getElementById('save-status').textContent = '✓ Guardado · ' + ts;
+      showToast(res.filas + ' lecturas guardadas para ' + id, 'success');
+      // Actualizar estado en panel
+      var idx = ST.panelData.findIndex(function(r){ return r.id_general === id; });
+      if (idx >= 0) { ST.panelData[idx].has_lecturas = true; }
+    } else {
+      showToast('Error al guardar: ' + (res ? res.error : '?'), 'error');
+    }
+  }, function(err){ loader(false); showToast('Error: ' + err.message, 'error'); });
+}
+
+// ══════════════════════════════════════════════════════════
+// GENERAR REPORTE (desde editor)
+// ══════════════════════════════════════════════════════════
+function generarReporte() {
+  if (!ST.currentRecord) { showToast('No hay registro seleccionado.', 'error'); return; }
+  _ejecutarGenerar(ST.currentRecord.id_general);
+}
+
+// ══════════════════════════════════════════════════════════
+// UI HELPERS
+// ══════════════════════════════════════════════════════════
+function loader(show, msg) {
+  var el = document.getElementById('loading-global');
+  var m  = document.getElementById('loading-msg');
+  if (show) {
+    if (m && msg) m.textContent = msg;
+    el.classList.remove('hidden'); el.classList.add('flex');
+  } else {
+    el.classList.add('hidden'); el.classList.remove('flex');
+  }
+}
+function showToast(msg, type) {
+  var t = document.getElementById('toast');
+  var c = { error:'bg-red-600 text-white', success:'bg-green-600 text-white',
+            warn:'bg-amber-500 text-white', info:'bg-slate-700 text-white' };
+  t.className = 'fixed bottom-20 left-1/2 -translate-x-1/2 px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg z-[70] ' + (c[type] || c.info);
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._tm); t._tm = setTimeout(function(){ t.style.display = 'none'; }, 4500);
+}
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ══════════════════════════════════════════════════════════
+// PUENTE GAS (live + mock local para desarrollo)
+// ══════════════════════════════════════════════════════════
+function callGAS(fn, args, onOk, onErr) {
+  var errFn = onErr || function(e){ showToast('Error: ' + (e.message||e), 'error'); };
+
+  // LOCALHOST → servidor Python local (lee del Excel real)
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    fetch('/api/' + fn, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ args: args })
+    })
+    .then(function(r) {
+      if (!r.ok) return r.json().then(function(e){ throw new Error(e.error || r.statusText); });
+      return r.json();
+    })
+    .then(function(data) { if (onOk) onOk(data); })
+    .catch(function(e)   { errFn(e); });
+    return;
+  }
+
+  // GOOGLE APPS SCRIPT (producción)
+  if (typeof google !== 'undefined' && google.script) {
+    var runner = google.script.run.withSuccessHandler(onOk).withFailureHandler(errFn);
+    runner[fn].apply(runner, args);
+    return;
+  }
+
+  // FALLBACK mock (file:// sin servidor)
+  mockGAS(fn, args, onOk, errFn);
+}
+
+function mockGAS(fn, args, cb) {
+  setTimeout(function() {
+    if (fn === 'validarUsuario') return cb({ ok:true, username: args[0] || 'dev' });
+
+    if (fn === 'getDatosFormulario') return cb({
+      catalogos: {
+        TUBERIAS: {
+          complementos: ['CODO 90°','CODO 45°','TEE','REDUCCION','VALVULA ESFERA','TUBERIA RECTA',
+                         'BRIDA','CARCASA BOMBA','ENTRADA DE BOQUILLA','CODO REDUCIDO','UNION','CABEZAL'],
+          diametros:    ['1/2','3/4','1','1 1/4','1 1/2','2','3','4','6','8','10','12','14','16','18','20','24']
+        },
+        TANQUES: {
+          complementos: ['VIROLA / SHELL','FONDO','TECHO FIJO','TECHO FLOTANTE',
+                         'ANULAR (ANILLO DE FONDO)','BOQUILLA / NOZZLE','PASO DE HOMBRE / MANWAY',
+                         'TUBERÍA DE SUCCIÓN','TUBERÍA DE DESCARGA','ESCALERA'],
+          diametros:    ['10 ft','20 ft','30 ft','40 ft','50 ft','3 m','6 m','9 m','12 m']
+        },
+        RECIPIENTES_A_PRESION: {
+          complementos: ['CUERPO / SHELL','CABEZA ELÍPTICA 2:1','CABEZA HEMISFÉRICA',
+                         'CABEZA TORISFÉRICA','BOQUILLA / NOZZLE','PASO DE HOMBRE / MANWAY',
+                         'SKIRT / FALDA DE SOPORTE','SILLA / SADDLE'],
+          diametros:    ['12"','18"','24"','30"','36"','42"','48"','54"','60"','72"','84"','96"']
+        }
+      },
+      b36: [
+        ['NPS','D_in','SCH5','SCH10','SCH20','SCH30','SCH40','SCH60','SCH80','SCH100','SCH120','SCH140','SCH160','XS','XXS'],
+        ['1/2','0.840','0.065','0.083','','','0.109','','0.147','','','','0.188','0.109','0.294'],
+        ['3/4','1.050','0.065','0.083','','','0.113','','0.154','','','','0.219','0.113','0.308'],
+        ['1','1.315','0.065','0.109','','','0.133','','0.179','','','','0.250','0.133','0.358'],
+        ['1 1/2','1.900','0.065','0.109','','','0.145','','0.200','','','','0.281','0.145','0.400'],
+        ['2','2.375','0.065','0.109','','0.154','0.154','','0.218','','0.344','','0.436','0.154','0.436'],
+        ['3','3.500','0.083','0.120','','','0.216','','0.300','','0.438','','0.600','0.216','0.600'],
+        ['4','4.500','0.083','0.120','0.237','','0.237','0.281','0.337','0.438','0.531','0.625','0.674','0.237','0.674'],
+        ['6','6.625','0.109','0.134','0.219','0.250','0.280','0.432','0.432','0.562','0.719','0.864','0.864','0.280','0.864'],
+        ['8','8.625','0.109','0.148','0.250','0.277','0.322','0.406','0.500','0.594','0.719','0.812','0.906','0.322','0.875'],
+        ['10','10.750','0.134','0.165','0.250','0.307','0.365','0.500','0.500','0.594','0.719','0.844','1.000','0.365','1.000'],
+        ['12','12.750','0.156','0.180','0.250','0.330','0.406','0.562','0.500','0.688','0.844','1.000','1.000','0.375','1.000']
+      ]
+    });
+
+    if (fn === 'getReportesExistentes') return cb([
+      { id_general:'REP-2024-001', cliente:'ECOPETROL', contrato:'CTR-2024-A', estacion:'ESTACIÓN COGUA',   sistema:'OLEODUCTO COGUA',      fecha:'05/01/2024', num_reporte:'UT-001', urlReporte:'',  has_lecturas:true  },
+      { id_general:'REP-2024-002', cliente:'CENIT',     contrato:'CTR-2024-B', estacion:'ESTACIÓN GALÁN',   sistema:'SISTEMA GAS COMPRIMIDO', fecha:'12/02/2024', num_reporte:'UT-002', urlReporte:'#', has_lecturas:true  },
+      { id_general:'REP-2024-003', cliente:'CENIT',     contrato:'CTR-2024-B', estacion:'ESTACIÓN VASCONIA',sistema:'TANQUES DE ALMACENAMIENTO',fecha:'18/03/2024',num_reporte:'UT-003', urlReporte:'',  has_lecturas:false },
+      { id_general:'REP-2024-004', cliente:'FRONTERA',  contrato:'CTR-2024-C', estacion:'CAMPO QUIFA',      sistema:'FLOWLINE FLO-01',        fecha:'22/04/2024', num_reporte:'UT-004', urlReporte:'',  has_lecturas:false }
+    ]);
+
+    if (fn === 'getLecturasPorId') return cb([
+      { CML:'CML-01', componente:'CODO 90°', diametro:'6', t_nominal:'0.280', med1:'0.265', med2:'0.258', med3:'0.271', med4:'0.260', observaciones:'' },
+      { CML:'CML-02', componente:'TUBERIA RECTA', diametro:'6', t_nominal:'0.280', med1:'0.275', med2:'0.278', med3:'0.270', observaciones:'Corrosión leve' }
+    ]);
+
+    if (fn === 'guardarLecturas')      return cb({ success:true, filas: (args[1]||[]).length, id: args[0] });
+    if (fn === 'generarReporte')       return cb({ success:true, url:'#', nombre:'Reporte_MOCK.xlsx' });
+    if (fn === 'eliminarLecturaCML')   return cb({ success:true, eliminadas:1 });
+    cb(null);
+  }, 300);
+}
+
+// ══════════════════════════════════════════════════════════
+// ON LOAD
+// ══════════════════════════════════════════════════════════
+window.onload = function() {
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+
+  // Modo local (sin GAS): auto-login para desarrollo
+  if (typeof google === 'undefined' || !google.script) {
+    ST.user = 'dev-local';
+    document.getElementById('username-badge').textContent = 'dev-local';
+    showScreen('panel');
+    initCatalogos();
+    cargarPanel();
+  }
+};
+</script>
+</body>
+</html>

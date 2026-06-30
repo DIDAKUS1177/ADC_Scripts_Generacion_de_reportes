@@ -1,0 +1,16 @@
+Lista de usuarios y contraseñas (acceso local para Inspectores):
+
+Usuario     | Contraseña
+------------------------
+user_1      | pass123
+user_2      | pass123
+user_3      | pass123
+user_4      | pass123
+user_5      | pass123
+user_6      | pass123
+user_7      | pass123
+user_8      | pass123
+user_9      | pass123
+user_10     | pass123
+
+Nota: Puedes cambiar las contraseñas internamente editando las variables de VALID_USERS en src/App.tsx
