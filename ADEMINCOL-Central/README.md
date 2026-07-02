@@ -71,9 +71,26 @@ ADEMINCOL-Central/
 
 Marcar aquí al completar cada fase (el modelo ejecutor DEBE actualizar esta tabla):
 
+- [x] **Mockup de frontend** (`frontend/`) — SPA completa con datos 100% simulados
+      (`src/mock/`), SIN conexión a backend/BD real. Sirve para validar UX y flujos
+      con el usuario antes de construir el backend. Ver detalle abajo.
 - [ ] Fase 1 — Base de datos
 - [ ] Fase 2 — Backend FastAPI
 - [ ] Fase 3 — Sincronización Sheets
 - [ ] Fase 4 — Generación de reportes
-- [ ] Fase 5 — Frontend React
+- [ ] Fase 5 — Frontend React (conectar el mockup a la API real — reemplazar `src/mock/client.ts` por `src/api/*.ts`)
 - [ ] Fase 6 — Despliegue
+
+### Detalle del mockup de frontend (completado)
+
+- Ruta: `frontend/` (Vite + React 19 + TypeScript strict + Tailwind v4 + React Router).
+- Cuentas demo: `admin` / `crojas` / `mortiz` / `jperez` / `ltorres`, contraseña `Demo2026*`.
+- Cubre: login, dashboard con indicadores por rol, listado de inspecciones (MT/PMI/VT/UT)
+  con filtros y generación de reportes (simulada, con 10% de fallo aleatorio para probar
+  el estado de error), detalle de inspección con tabs, OTs, gestión de usuarios (admin),
+  panel de sincronización (admin) y perfil con firma.
+- **Sin conexión real**: todos los datos viven en `frontend/src/mock/data.ts` y
+  `frontend/src/mock/client.ts` simula latencia de red. Cuando el backend de la Fase 2
+  exista, ese archivo se reemplaza por llamadas axios reales sin tocar los componentes
+  (misma forma de datos, mismos tipos en `src/types/index.ts`).
+- Ejecutar: `cd frontend && npm install && npm run dev`.
