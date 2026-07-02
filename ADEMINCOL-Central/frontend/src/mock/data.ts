@@ -155,55 +155,10 @@ export const MOCK_WORK_ORDERS: WorkOrder[] = [
 const nombresPersonal = (n: number) =>
   n === 4 ? "Jorge Luis Pérez" : n === 5 ? "Laura Camila Torres" : "Andrés Felipe Gómez";
 
+// Nota: MT ya NO tiene entradas simuladas aquí — se conectó a datos reales
+// de Google Sheets (ver RealMtInspectionsPanel.tsx). PMI/VT/UT siguen mock
+// hasta que se conecten en las próximas iteraciones.
 export const MOCK_INSPECTIONS: InspectionListItem[] = [
-  {
-    id: 101,
-    reportType: "MT",
-    idInforme: "MT-2026-0311",
-    cliente: "Ecopetrol S.A. - GRB",
-    fecha: "2026-06-28",
-    reporteN: "RPT-0311",
-    workOrderId: 1,
-    workOrderNumero: "OT-2026-0142",
-    estadoReporte: "GENERADO",
-    syncedAt: "2026-07-02T13:05:00Z",
-  },
-  {
-    id: 102,
-    reportType: "MT",
-    idInforme: "MT-2026-0312",
-    cliente: "Ecopetrol S.A. - GRB",
-    fecha: "2026-06-29",
-    reporteN: "RPT-0312",
-    workOrderId: 1,
-    workOrderNumero: "OT-2026-0142",
-    estadoReporte: "PENDIENTE",
-    syncedAt: "2026-07-02T13:05:00Z",
-  },
-  {
-    id: 103,
-    reportType: "MT",
-    idInforme: "MT-2026-0313",
-    cliente: "Ecopetrol S.A. - GRB",
-    fecha: "2026-06-30",
-    reporteN: null,
-    workOrderId: null,
-    workOrderNumero: null,
-    estadoReporte: "PENDIENTE",
-    syncedAt: "2026-07-02T13:05:00Z",
-  },
-  {
-    id: 104,
-    reportType: "MT",
-    idInforme: "MT-2026-0314",
-    cliente: "Frontera Energy",
-    fecha: "2026-07-01",
-    reporteN: null,
-    workOrderId: 3,
-    workOrderNumero: "OT-2026-0144",
-    estadoReporte: "ERROR",
-    syncedAt: "2026-07-02T13:05:00Z",
-  },
   {
     id: 105,
     reportType: "PMI",
@@ -308,7 +263,8 @@ export function getDashboardStats(role: Role): DashboardStats {
   return {
     otsPorEstado: { PENDIENTE: 1, EN_CURSO: 1, COMPLETADA: 1, CANCELADA: 0 },
     reportesGeneradosMes: role === "INSPECTOR" ? 1 : 14,
-    inspeccionesPendientesPorTipo: { MT: 2, PMI: 0, VT_SOLDADAS: 0, UT_ESPESORES: 0 },
+    // MT ya no usa conteo simulado: se muestra con datos reales en Inspecciones → MT.
+    inspeccionesPendientesPorTipo: { MT: 0, PMI: 0, VT_SOLDADAS: 0, UT_ESPESORES: 0 },
     ultimaSincronizacion: "2026-07-02T13:05:00Z",
   };
 }

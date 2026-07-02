@@ -11,7 +11,6 @@ import { InspectionsPage } from "./pages/InspectionsPage";
 import { InspectionDetailPage } from "./pages/InspectionDetailPage";
 import { SyncPage } from "./pages/SyncPage";
 import { ProfilePage } from "./pages/ProfilePage";
-import { RealMtPreviewPage } from "./pages/RealMtPreviewPage";
 
 export default function App() {
   return (
@@ -46,7 +45,6 @@ export default function App() {
               />
               <Route path="/inspecciones" element={<InspectionsPage />} />
               <Route path="/inspecciones/:id" element={<InspectionDetailPage />} />
-              <Route path="/preview-real-mt" element={<RealMtPreviewPage />} />
               <Route
                 path="/sync"
                 element={

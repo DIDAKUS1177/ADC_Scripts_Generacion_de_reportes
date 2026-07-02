@@ -34,10 +34,16 @@ export interface MtPreviewIndicacion {
   long: string;
 }
 
+export interface MtPreviewFoto {
+  url: string;
+  descripcion: string;
+}
+
 export interface MtPreviewDetail extends MtPreviewItem {
   datosGenerales: Record<string, string | null>;
   resultados: MtPreviewResultado[];
   indicaciones: MtPreviewIndicacion[];
+  fotos: MtPreviewFoto[];
 }
 
 export async function fetchRealMtInspections(): Promise<MtPreviewItem[]> {
@@ -56,4 +62,30 @@ export async function fetchRealMtInspectionDetail(idInforme: string): Promise<Mt
     throw new PreviewApiError("No se pudo cargar el detalle real de esta inspección.");
   }
   return res.json();
+}
+
+export async function generateRealMtReport(idInforme: string): Promise<void> {
+  const res = await fetch(
+    `${PREVIEW_API_BASE}/api/preview/mt/${encodeURIComponent(idInforme)}/generar-reporte`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    let detail = "No se pudo generar el reporte.";
+    try {
+      const body = await res.json();
+      detail = body.detail || detail;
+    } catch {
+      // respuesta no era JSON, se usa el mensaje genérico
+    }
+    throw new PreviewApiError(detail);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Reporte_MT_${idInforme}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }

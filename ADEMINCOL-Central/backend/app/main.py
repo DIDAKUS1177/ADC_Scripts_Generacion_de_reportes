@@ -1,15 +1,17 @@
 """
 Backend de PREVIEW (temporal) — lee datos reales de Google Sheets sin base de
-datos ni autenticación. Objetivo: validar visualmente en el frontend que la
+datos ni autenticación, y genera el reporte MT real con openpyxl usando la
+plantilla verificada. Objetivo: validar visualmente en el frontend que la
 conexión real funciona, antes de construir el backend completo (Fases 1-4 en
 ADEMINCOL-Central/docs/). NO usar en producción — no hay auth, no hay caché,
-no hay manejo de reintentos. Se reemplaza por el backend real de la Fase 2-3.
+no hay manejo de reintentos. Se reemplaza por el backend real de la Fase 2-4.
 """
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+from .report_engine_mt import generar_reporte_mt
 from .sheets_client import MT_SPREADSHEET_ID, read_sheet_as_dicts
 
 logging.basicConfig(level=logging.INFO)
@@ -20,7 +22,7 @@ app = FastAPI(title="ADEMINCOL Central — Preview API (temporal)")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5174", "http://localhost:5173"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -61,15 +63,12 @@ def list_mt_inspections():
     return items
 
 
-@app.get("/api/preview/mt/{id_informe}")
-def get_mt_inspection_detail(id_informe: str):
-    try:
-        generales = read_sheet_as_dicts(MT_SPREADSHEET_ID, "2.general_particulas_magneticas")
-        resultados = read_sheet_as_dicts(MT_SPREADSHEET_ID, "3.resultados_inspeccion")
-        indicaciones = read_sheet_as_dicts(MT_SPREADSHEET_ID, "5.indicaciones")
-    except Exception as e:
-        logger.exception("Error leyendo hojas de MT")
-        raise HTTPException(status_code=502, detail=f"No se pudo leer el Sheet de MT: {e}")
+def _cargar_datos_mt(id_informe: str):
+    generales = read_sheet_as_dicts(MT_SPREADSHEET_ID, "2.general_particulas_magneticas")
+    resultados = read_sheet_as_dicts(MT_SPREADSHEET_ID, "3.resultados_inspeccion")
+    indicaciones = read_sheet_as_dicts(MT_SPREADSHEET_ID, "5.indicaciones")
+    calidad = read_sheet_as_dicts(MT_SPREADSHEET_ID, "4.2.reg_calidad")
+    fotos_resultado = read_sheet_as_dicts(MT_SPREADSHEET_ID, "4.reg_fotografico")
 
     fila_general = next(
         (r for r in generales if r.get("id_informe", "").strip() == id_informe), None
@@ -77,9 +76,36 @@ def get_mt_inspection_detail(id_informe: str):
     if not fila_general:
         raise HTTPException(status_code=404, detail=f"No existe el informe {id_informe}")
 
-    filas_resultado = [
-        r for r in resultados if r.get("id_informe_fk", "").strip() == id_informe
-    ]
+    filas_resultado = [r for r in resultados if r.get("id_informe_fk", "").strip() == id_informe]
+
+    # Fotos de calidad (vinculadas directo al informe)
+    fotos = []
+    for f in calidad:
+        if f.get("id_general", "").strip() == id_informe:
+            url = (f.get("link") or f.get("imagen") or "").strip()
+            if url:
+                fotos.append({"url": url, "descripcion": f.get("descripcion", "")})
+
+    # Fotos de resultados (vinculadas por id_resultado_fk)
+    ids_resultado = {r.get("id_resultado", "").strip() for r in filas_resultado}
+    for f in fotos_resultado:
+        if f.get("id_resultado_fk", "").strip() in ids_resultado:
+            url = (f.get("link") or f.get("imagen") or "").strip()
+            if url:
+                fotos.append({"url": url, "descripcion": f.get("descripcion", "")})
+
+    return fila_general, filas_resultado, indicaciones, fotos
+
+
+@app.get("/api/preview/mt/{id_informe}")
+def get_mt_inspection_detail(id_informe: str):
+    try:
+        fila_general, filas_resultado, indicaciones, fotos = _cargar_datos_mt(id_informe)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error leyendo hojas de MT")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer el Sheet de MT: {e}")
 
     resultados_out = []
     indicaciones_out = []
@@ -134,6 +160,30 @@ def get_mt_inspection_detail(id_informe: str):
         },
         "resultados": resultados_out,
         "indicaciones": indicaciones_out,
-        "fotos": [],
+        "fotos": fotos,
         "historialReportes": [],
     }
+
+
+@app.post("/api/preview/mt/{id_informe}/generar-reporte")
+def generar_reporte_real(id_informe: str):
+    try:
+        fila_general, filas_resultado, indicaciones, fotos = _cargar_datos_mt(id_informe)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error leyendo hojas de MT para generar reporte")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer el Sheet de MT: {e}")
+
+    try:
+        contenido = generar_reporte_mt(fila_general, filas_resultado, indicaciones, fotos)
+    except Exception as e:
+        logger.exception("Error generando el reporte MT")
+        raise HTTPException(status_code=500, detail=f"Error generando el reporte: {e}")
+
+    nombre_archivo = f"Reporte_MT_{id_informe}.xlsx"
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
+    )

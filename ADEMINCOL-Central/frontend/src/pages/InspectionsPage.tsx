@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Search, Sparkles, Eye, Download, Link2, RefreshCw, RadioTower } from "lucide-react";
+import { Search, Sparkles, Eye, Download, Link2, RefreshCw } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { ReportStatusBadge } from "../components/ui/StatusBadge";
 import { Spinner, EmptyState, ErrorState } from "../components/ui/States";
 import { fetchInspections, generateReport, runSync } from "../mock/client";
 import type { InspectionListItem, ReportTypeCode } from "../types";
+import { RealMtInspectionsPanel } from "../components/domain/RealMtInspectionsPanel";
 
 const TYPE_TABS: { code: ReportTypeCode | "TODOS"; label: string }[] = [
   { code: "TODOS", label: "Todos" },
@@ -108,25 +109,16 @@ export function InspectionsPage() {
             Datos sincronizados desde Google Sheets (AppSheet)
           </p>
         </div>
-        <div className="flex items-center gap-2 self-start">
-          <Link
-            to="/preview-real-mt"
-            className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+        {tab !== "MT" && canManage && (
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="flex items-center gap-2 self-start rounded-lg border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 hover:bg-ink-50 disabled:opacity-60"
           >
-            <RadioTower size={15} />
-            Ver datos reales (Sheets MT)
-          </Link>
-          {canManage && (
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="flex items-center gap-2 rounded-lg border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 hover:bg-ink-50 disabled:opacity-60"
-            >
-              <RefreshCw size={15} className={syncing ? "animate-spin" : ""} />
-              {syncing ? "Sincronizando..." : "Sincronizar ahora"}
-            </button>
-          )}
-        </div>
+            <RefreshCw size={15} className={syncing ? "animate-spin" : ""} />
+            {syncing ? "Sincronizando..." : "Sincronizar ahora"}
+          </button>
+        )}
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
@@ -145,6 +137,10 @@ export function InspectionsPage() {
         ))}
       </div>
 
+      {tab === "MT" ? (
+        <RealMtInspectionsPanel />
+      ) : (
+        <>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative max-w-sm flex-1">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
@@ -257,6 +253,8 @@ export function InspectionsPage() {
             </tbody>
           </table>
         </div>
+      )}
+        </>
       )}
     </div>
   );

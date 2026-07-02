@@ -2,3 +2,6 @@ fastapi>=0.110
 uvicorn[standard]
 google-api-python-client
 google-auth
+openpyxl>=3.1
+Pillow
+httpx
