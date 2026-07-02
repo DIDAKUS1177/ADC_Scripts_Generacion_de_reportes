@@ -53,6 +53,31 @@ FILA_BASE_FOTO = 49
 FILA_BASE_DESC = 50
 
 
+def _insertar_filas_y_ajustar_alturas(ws, pos: int, n: int):
+    """`ws.insert_rows()` desplaza el CONTENIDO de las celdas pero NO desplaza
+    `ws.row_dimensions` (las alturas de fila) — bug/limitación conocida de
+    openpyxl, confirmada empíricamente el 2026-07-02: una fila con height=200
+    se queda en su número de fila original aunque su contenido se mueva 1
+    fila hacia abajo. Esto causaba que la fila alta de fotos (221px) quedara
+    pegada al encabezado "6. REGISTRO FOTOGRAFICO" y las fotos terminaran en
+    una fila de altura normal (~20px), forzando el escalado a un tamaño
+    minúsculo. Aquí se recalculan las alturas manualmente después de insertar
+    (limpiar todo el rango afectado y reescribir con los valores desplazados).
+    """
+    max_row_antes = ws.max_row
+    alturas_originales = {
+        r: ws.row_dimensions[r].height
+        for r in range(pos, max_row_antes + 1)
+        if r in ws.row_dimensions and ws.row_dimensions[r].height is not None
+    }
+    ws.insert_rows(pos, n)
+    for r in range(pos, max_row_antes + n + 1):
+        if r in ws.row_dimensions:
+            ws.row_dimensions[r].height = None
+    for r_original, altura in alturas_originales.items():
+        ws.row_dimensions[r_original + n].height = altura
+
+
 def _copiar_estilo_fila(ws, fila_origen: int, fila_destino: int, max_col: int = 20):
     for c in range(1, max_col + 1):
         origen = ws.cell(row=fila_origen, column=c)
@@ -168,7 +193,7 @@ def generar_reporte_mt(
     # ---- Fase 2: insertar filas de la tabla de resultados ----
     if filas_extra_resultados > 0:
         fila_patron = FILA_INICIO_INSPECCION + 1  # fila 45, ya con formato
-        ws.insert_rows(fila_patron + 1, filas_extra_resultados)
+        _insertar_filas_y_ajustar_alturas(ws, fila_patron + 1, filas_extra_resultados)
         for i in range(filas_extra_resultados):
             _copiar_estilo_fila(ws, fila_patron, fila_patron + 1 + i)
 
@@ -179,7 +204,7 @@ def generar_reporte_mt(
     posiciones_fotos: list[tuple[int, int]] = []  # (fila_foto, fila_desc) por índice de foto
     ultima_fila_desc = fila_base_desc_actual
     for p in range(pares_fotos_extra):
-        ws.insert_rows(ultima_fila_desc + 1, 2)
+        _insertar_filas_y_ajustar_alturas(ws, ultima_fila_desc + 1, 2)
         f_foto, f_desc = ultima_fila_desc + 1, ultima_fila_desc + 2
         _copiar_estilo_fila(ws, fila_base_foto_actual, f_foto)
         _copiar_estilo_fila(ws, fila_base_desc_actual, f_desc)
