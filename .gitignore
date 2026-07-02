@@ -19,6 +19,13 @@ __pycache__/
 *.pyo
 .env
 
+# Credenciales / secretos (NUNCA subir a git)
+credentials/
+*.iam.gserviceaccount.com.json
+adcformatos-*.json
+service-account*.json
+storage/
+
 # VS Code
 .vscode/
 
