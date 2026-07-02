@@ -64,21 +64,50 @@ export async function fetchRealMtInspectionDetail(idInforme: string): Promise<Mt
   return res.json();
 }
 
-export async function generateRealMtReport(idInforme: string): Promise<void> {
+async function leerDetalleError(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json();
+    return body.detail || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// ---- Generación asíncrona con progreso ----
+
+export interface JobStatus {
+  estado: "RUNNING" | "DONE" | "ERROR";
+  pct: number;
+  etapa: string;
+  error: string | null;
+}
+
+export async function startReportJob(
+  idInforme: string,
+  overrides: Record<string, string>
+): Promise<string> {
   const res = await fetch(
     `${PREVIEW_API_BASE}/api/preview/mt/${encodeURIComponent(idInforme)}/generar-reporte`,
-    { method: "POST" }
-  );
-  if (!res.ok) {
-    let detail = "No se pudo generar el reporte.";
-    try {
-      const body = await res.json();
-      detail = body.detail || detail;
-    } catch {
-      // respuesta no era JSON, se usa el mensaje genérico
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ overrides }),
     }
-    throw new PreviewApiError(detail);
-  }
+  );
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo iniciar la generación."));
+  const body = await res.json();
+  return body.jobId;
+}
+
+export async function getJobStatus(jobId: string): Promise<JobStatus> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/jobs/${jobId}`);
+  if (!res.ok) throw new PreviewApiError("No se pudo consultar el progreso.");
+  return res.json();
+}
+
+export async function downloadJobResult(jobId: string, idInforme: string): Promise<void> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/jobs/${jobId}/descargar`);
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo descargar el reporte."));
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -88,4 +117,102 @@ export async function generateRealMtReport(idInforme: string): Promise<void> {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+// ---- Usuarios (BD real en Sheets) ----
+
+export interface RealUser {
+  idUsuario: string;
+  nombre: string;
+  usuario: string;
+  correo: string | null;
+  rol: "ADMINISTRADOR" | "SUPERVISOR" | "INSPECTOR";
+  cargo: string | null;
+  certificado: string | null;
+  tieneFirma: boolean;
+  activo: boolean;
+  createdAt: string | null;
+}
+
+export interface NewUserPayload {
+  nombre: string;
+  usuario: string;
+  password: string;
+  rol: string;
+  correo?: string;
+  cargo?: string;
+  certificado?: string;
+}
+
+export async function fetchRealUsers(): Promise<RealUser[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/usuarios`);
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo leer la BD de usuarios."));
+  return res.json();
+}
+
+export async function createRealUser(payload: NewUserPayload): Promise<void> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/usuarios`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo crear el usuario."));
+}
+
+export async function toggleRealUserActive(usuario: string, activo: boolean): Promise<void> {
+  const res = await fetch(
+    `${PREVIEW_API_BASE}/api/preview/usuarios/${encodeURIComponent(usuario)}/activo`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activo }),
+    }
+  );
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo actualizar el usuario."));
+}
+
+// ---- Órdenes de Trabajo (BD real en Sheets) ----
+
+export interface RealOT {
+  idOt: string;
+  numero: string;
+  contrato: string | null;
+  cliente: string | null;
+  ubicacion: string | null;
+  supervisorUsuario: string | null;
+  inspectorUsuario: string | null;
+  fechaInicio: string | null;
+  fechaFin: string | null;
+  estado: "PENDIENTE" | "EN_CURSO" | "COMPLETADA" | "CANCELADA";
+  descripcion: string | null;
+  observaciones: string | null;
+}
+
+export interface NewOTPayload {
+  numero: string;
+  contrato?: string;
+  cliente?: string;
+  ubicacion?: string;
+  supervisorUsuario?: string;
+  inspectorUsuario?: string;
+  fechaInicio?: string;
+  fechaFin?: string;
+  estado?: string;
+  descripcion?: string;
+  observaciones?: string;
+}
+
+export async function fetchRealOTs(): Promise<RealOT[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/ots`);
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo leer la BD de OTs."));
+  return res.json();
+}
+
+export async function createRealOT(payload: NewOTPayload): Promise<void> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/ots`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo crear la OT."));
 }

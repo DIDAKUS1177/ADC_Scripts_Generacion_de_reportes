@@ -31,3 +31,6 @@ storage/
 
 # Archivos de sistema Mac
 .DS_Store
+
+# Reportes generados de prueba (no versionar)
+Reporte_MT_*.xlsx

@@ -17,6 +17,7 @@ from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
 from openpyxl.drawing.xdr import XDRPositiveSize2D
+from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
 from openpyxl.utils.units import pixels_to_EMU
 
@@ -55,27 +56,64 @@ FILA_BASE_DESC = 50
 
 def _insertar_filas_y_ajustar_alturas(ws, pos: int, n: int):
     """`ws.insert_rows()` desplaza el CONTENIDO de las celdas pero NO desplaza
-    `ws.row_dimensions` (las alturas de fila) — bug/limitación conocida de
-    openpyxl, confirmada empíricamente el 2026-07-02: una fila con height=200
-    se queda en su número de fila original aunque su contenido se mueva 1
-    fila hacia abajo. Esto causaba que la fila alta de fotos (221px) quedara
-    pegada al encabezado "6. REGISTRO FOTOGRAFICO" y las fotos terminaran en
-    una fila de altura normal (~20px), forzando el escalado a un tamaño
-    minúsculo. Aquí se recalculan las alturas manualmente después de insertar
-    (limpiar todo el rango afectado y reescribir con los valores desplazados).
+    ni `ws.row_dimensions` (alturas de fila) ni `ws.merged_cells.ranges`
+    (celdas combinadas) — limitaciones de openpyxl confirmadas empíricamente
+    el 2026-07-02 con tests aislados. Consecuencias que esto causaba:
+    - La fila alta de fotos (221px) quedaba en el número de fila equivocado
+      y las fotos aterrizaban en filas de ~20px.
+    - Los merges (A49:K49 del área de foto, B44:D44 de identificación, etc.)
+      quedaban huérfanos en sus filas originales; `_insertar_imagen_centrada`
+      no encontraba merge en la posición final de la foto y escalaba la
+      imagen al ancho de UNA columna (~48px → miniaturas), y la tabla de
+      resultados se veía rota (texto desbordado, celdas sin combinar).
+    Aquí se desplazan manualmente ambas cosas después de insertar.
     """
     max_row_antes = ws.max_row
+
     alturas_originales = {
         r: ws.row_dimensions[r].height
         for r in range(pos, max_row_antes + 1)
         if r in ws.row_dimensions and ws.row_dimensions[r].height is not None
     }
+
+    # Merges que empiezan en/debajo del punto de inserción: quitar, desplazar, reponer.
+    # (Merges que CRUZAN el punto de inserción no existen en esta plantilla.)
+    merges_a_mover = [r for r in list(ws.merged_cells.ranges) if r.min_row >= pos]
+    for rng in merges_a_mover:
+        ws.unmerge_cells(str(rng))
+
     ws.insert_rows(pos, n)
+
+    for rng in merges_a_mover:
+        rng.shift(0, n)
+        ws.merge_cells(str(rng))
+
     for r in range(pos, max_row_antes + n + 1):
         if r in ws.row_dimensions:
             ws.row_dimensions[r].height = None
     for r_original, altura in alturas_originales.items():
         ws.row_dimensions[r_original + n].height = altura
+
+
+def _replicar_merges_de_fila(ws, fila_origen: int, fila_destino: int):
+    """Copia los rangos combinados de UNA fila (solo los que empiezan y
+    terminan en esa fila) a otra fila. Necesario porque las filas insertadas
+    nacen sin merges y la plantilla los usa en la tabla de resultados
+    (B:D identificación, E:F zona, G:H diám, O:P evaluación, Q:T observaciones)
+    y en las filas de fotos (A:K / L:T)."""
+    origen_merges = [
+        rng for rng in list(ws.merged_cells.ranges)
+        if rng.min_row == fila_origen and rng.max_row == fila_origen
+    ]
+    for rng in origen_merges:
+        ref = (
+            f"{get_column_letter(rng.min_col)}{fila_destino}:"
+            f"{get_column_letter(rng.max_col)}{fila_destino}"
+        )
+        try:
+            ws.merge_cells(ref)
+        except ValueError:
+            pass  # ya existe un merge equivalente
 
 
 def _copiar_estilo_fila(ws, fila_origen: int, fila_destino: int, max_col: int = 20):
@@ -170,17 +208,27 @@ def generar_reporte_mt(
     resultados: list[dict],
     indicaciones: list[dict],
     fotos: list[dict],
+    progreso=None,
 ) -> bytes:
     """Genera el .xlsx real y devuelve los bytes del archivo.
 
+    `progreso`: callback opcional `fn(pct: int, etapa: str)` para reportar
+    avance (usado por el endpoint asíncrono con barra de progreso).
+
     IMPORTANTE — orden de operaciones (fuente de un bug ya corregido):
     openpyxl `insert_rows()` desplaza celdas y sus VALORES automáticamente,
-    pero NO desplaza imágenes ya insertadas con `add_image()`. Por eso el
+    pero NO desplaza imágenes ya insertadas con `add_image()` (ni merges ni
+    alturas — eso lo maneja `_insertar_filas_y_ajustar_alturas`). Por eso el
     orden correcto es: 1) calcular e insertar TODAS las filas extra
     (resultados y fotos) primero, 2) escribir todo el texto en las
     posiciones finales, 3) insertar las imágenes al final, cuando ya no
     habrá más inserciones de filas que las desalineen.
     """
+    def _reportar(pct: int, etapa: str):
+        if progreso:
+            progreso(pct, etapa)
+
+    _reportar(5, "Preparando plantilla")
     wb = load_workbook(TEMPLATE_PATH)
     ws = wb["FORMATO_MT"]
 
@@ -191,16 +239,23 @@ def generar_reporte_mt(
     filas_extra_fotos = pares_fotos_extra * 2
 
     # ---- Fase 2: insertar filas de la tabla de resultados ----
+    _reportar(10, "Insertando filas de resultados")
     if filas_extra_resultados > 0:
         fila_patron = FILA_INICIO_INSPECCION + 1  # fila 45, ya con formato
         _insertar_filas_y_ajustar_alturas(ws, fila_patron + 1, filas_extra_resultados)
+        altura_patron = ws.row_dimensions[fila_patron].height
         for i in range(filas_extra_resultados):
-            _copiar_estilo_fila(ws, fila_patron, fila_patron + 1 + i)
+            fila_nueva = fila_patron + 1 + i
+            _copiar_estilo_fila(ws, fila_patron, fila_nueva)
+            _replicar_merges_de_fila(ws, fila_patron, fila_nueva)
+            if altura_patron:
+                ws.row_dimensions[fila_nueva].height = altura_patron
 
     fila_base_foto_actual = FILA_BASE_FOTO + filas_extra_resultados
     fila_base_desc_actual = FILA_BASE_DESC + filas_extra_resultados
 
     # ---- Fase 3: insertar filas extra de fotos (pares más allá del primero) ----
+    _reportar(15, "Insertando filas de fotos")
     posiciones_fotos: list[tuple[int, int]] = []  # (fila_foto, fila_desc) por índice de foto
     ultima_fila_desc = fila_base_desc_actual
     for p in range(pares_fotos_extra):
@@ -208,6 +263,8 @@ def generar_reporte_mt(
         f_foto, f_desc = ultima_fila_desc + 1, ultima_fila_desc + 2
         _copiar_estilo_fila(ws, fila_base_foto_actual, f_foto)
         _copiar_estilo_fila(ws, fila_base_desc_actual, f_desc)
+        _replicar_merges_de_fila(ws, fila_base_foto_actual, f_foto)
+        _replicar_merges_de_fila(ws, fila_base_desc_actual, f_desc)
         ws.row_dimensions[f_foto].height = ws.row_dimensions[fila_base_foto_actual].height
         ws.row_dimensions[f_desc].height = ws.row_dimensions[fila_base_desc_actual].height
         posiciones_fotos.append((f_foto, f_desc))
@@ -223,6 +280,7 @@ def generar_reporte_mt(
         return fila_original
 
     # ---- Fase 4: escribir texto (datos generales, resultados, indicaciones, descripciones de fotos) ----
+    _reportar(20, "Escribiendo datos generales")
     for campo, celda in CELDAS_GENERALES.items():
         valor = fila_general.get(campo)
         if valor:
@@ -252,17 +310,22 @@ def generar_reporte_mt(
         fila_foto_por_indice.append((f_foto, "A" if es_par else "L"))
 
     # ---- Fase 5: insertar imágenes (firma + fotos), ya con todas las filas en su lugar final ----
+    _reportar(30, "Insertando firma")
     firma_bytes = _descargar_imagen(fila_general.get("firma_link", ""))
     if firma_bytes:
         col_firma, fila_firma = coordinate_from_string(CELDA_FIRMA)
         _insertar_imagen_centrada(ws, firma_bytes, f"{col_firma}{fila_final(fila_firma)}")
 
+    # La descarga de fotos es donde va casi todo el tiempo: 35% → 95%
     for idx, foto in enumerate(fotos):
+        pct = 35 + round((idx / max(len(fotos), 1)) * 60)
+        _reportar(pct, f"Descargando foto {idx + 1} de {len(fotos)}")
         img_bytes = _descargar_imagen(foto.get("url") or "")
         if img_bytes:
             f_foto, col_foto = fila_foto_por_indice[idx]
             _insertar_imagen_centrada(ws, img_bytes, f"{col_foto}{f_foto}")
 
+    _reportar(97, "Guardando archivo")
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()

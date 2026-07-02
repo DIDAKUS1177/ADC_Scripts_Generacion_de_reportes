@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
-import { Download, Eye, ImageIcon, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Download, Eye, ImageIcon, PencilLine } from "lucide-react";
 import {
+  downloadJobResult,
   fetchRealMtInspectionDetail,
   fetchRealMtInspections,
-  generateRealMtReport,
+  getJobStatus,
+  startReportJob,
   PreviewApiError,
   type MtPreviewDetail,
   type MtPreviewItem,
@@ -12,9 +14,10 @@ import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
 import { useToast } from "../ui/Toast";
 
-// Panel de datos REALES de MT (Google Sheets, sin BD, sin auth). Reemplaza la
-// vista de datos simulados en la pestaña MT de InspectionsPage porque ya
-// existe conexión real. Se retira cuando la Fase 3-4 esté lista.
+// Panel de datos REALES de MT (Google Sheets, sin BD, sin auth). Los datos
+// generales son editables antes de generar: los cambios se aplican SOLO al
+// reporte generado (no se escriben de vuelta al Sheet). La generación es
+// asíncrona con barra de progreso (polling del job cada 700 ms).
 export function RealMtInspectionsPanel() {
   const toast = useToast();
   const [items, setItems] = useState<MtPreviewItem[] | null>(null);
@@ -22,7 +25,9 @@ export function RealMtInspectionsPanel() {
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<MtPreviewDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [generando, setGenerando] = useState(false);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [job, setJob] = useState<{ pct: number; etapa: string } | null>(null);
+  const pollRef = useRef<number | null>(null);
 
   function load() {
     setError(null);
@@ -32,27 +37,55 @@ export function RealMtInspectionsPanel() {
       .catch((e) => setError(e instanceof Error ? e.message : "Error desconocido"));
   }
 
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+    return () => {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+    };
+  }, []);
 
   function openDetail(idInforme: string) {
     setSelected(idInforme);
     setDetail(null);
     setDetailError(null);
+    setEdits({});
     fetchRealMtInspectionDetail(idInforme)
       .then(setDetail)
       .catch((e) => setDetailError(e instanceof Error ? e.message : "Error desconocido"));
   }
 
   async function handleGenerar() {
-    if (!selected) return;
-    setGenerando(true);
+    if (!selected || job) return;
+    setJob({ pct: 0, etapa: "Iniciando..." });
     try {
-      await generateRealMtReport(selected);
-      toast.success("Reporte generado y descargado.");
+      const jobId = await startReportJob(selected, edits);
+      pollRef.current = window.setInterval(async () => {
+        try {
+          const status = await getJobStatus(jobId);
+          if (status.estado === "RUNNING") {
+            setJob({ pct: status.pct, etapa: status.etapa });
+            return;
+          }
+          if (pollRef.current) window.clearInterval(pollRef.current);
+          pollRef.current = null;
+          if (status.estado === "DONE") {
+            setJob({ pct: 100, etapa: "Descargando..." });
+            await downloadJobResult(jobId, selected);
+            toast.success("Reporte generado y descargado.");
+          } else {
+            toast.error(status.error || "Error al generar el reporte.");
+          }
+          setJob(null);
+        } catch {
+          if (pollRef.current) window.clearInterval(pollRef.current);
+          pollRef.current = null;
+          setJob(null);
+          toast.error("Se perdió la conexión con el backend.");
+        }
+      }, 700);
     } catch (e) {
-      toast.error(e instanceof PreviewApiError ? e.message : "Error al generar el reporte.");
-    } finally {
-      setGenerando(false);
+      setJob(null);
+      toast.error(e instanceof PreviewApiError ? e.message : "Error al iniciar la generación.");
     }
   }
 
@@ -120,22 +153,51 @@ export function RealMtInspectionsPanel() {
                   {detail.cliente} · {detail.fecha} · {detail.reporteN}
                 </p>
               </div>
-              <button
-                onClick={handleGenerar}
-                disabled={generando}
-                className="flex shrink-0 items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-              >
-                {generando ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                {generando ? "Generando..." : "Generar reporte real (.xlsx)"}
-              </button>
+              {!job && (
+                <button
+                  onClick={handleGenerar}
+                  className="flex shrink-0 items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+                >
+                  <Download size={14} />
+                  Generar reporte (.xlsx)
+                </button>
+              )}
             </div>
 
-            <p className="mb-2 text-xs font-semibold uppercase text-ink-400">Datos generales</p>
+            {job && (
+              <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50 p-3">
+                <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-brand-700">
+                  <span>{job.etapa}</span>
+                  <span>{job.pct}%</span>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-brand-100">
+                  <div
+                    className="h-full rounded-full bg-brand-600 transition-all duration-500"
+                    style={{ width: `${job.pct}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-400">
+              Datos generales
+              <span className="flex items-center gap-1 rounded bg-ink-100 px-1.5 py-0.5 text-[10px] font-medium normal-case text-ink-500">
+                <PencilLine size={10} /> editables — solo afectan el reporte generado
+              </span>
+            </p>
             <div className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
               {Object.entries(detail.datosGenerales).map(([k, v]) => (
                 <div key={k}>
-                  <p className="text-ink-400">{k.replace(/_/g, " ")}</p>
-                  <p className="truncate text-ink-800">{v || "—"}</p>
+                  <p className="mb-0.5 text-ink-400">{k.replace(/_/g, " ")}</p>
+                  <input
+                    value={edits[k] ?? (v || "")}
+                    onChange={(e) => setEdits((prev) => ({ ...prev, [k]: e.target.value }))}
+                    className={`w-full rounded border px-1.5 py-1 text-xs outline-none focus:border-brand-600 ${
+                      edits[k] !== undefined && edits[k] !== (v || "")
+                        ? "border-amber-400 bg-amber-50"
+                        : "border-ink-200"
+                    }`}
+                  />
                 </div>
               ))}
             </div>

@@ -1,7 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
-import { Search, UserPlus, PenSquare, Ban, CheckCircle2, Signature } from "lucide-react";
-import { fetchUsers, toggleUserActive } from "../mock/client";
-import type { Role, User } from "../types";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Search, UserPlus, Ban, CheckCircle2, Signature, X, Loader2 } from "lucide-react";
+import {
+  createRealUser,
+  fetchRealUsers,
+  toggleRealUserActive,
+  PreviewApiError,
+  type NewUserPayload,
+  type RealUser,
+} from "../api/previewClient";
+import type { Role } from "../types";
 import { Spinner, ErrorState, EmptyState } from "../components/ui/States";
 import { Badge } from "../components/ui/Badge";
 import { ROLE_LABEL } from "../components/layout/navConfig";
@@ -13,19 +20,24 @@ const ROLE_TONE: Record<Role, "red" | "blue" | "green"> = {
   INSPECTOR: "green",
 };
 
+// Página conectada a la BD REAL en Google Sheets (hoja "usuarios", decisión D11).
+// La contraseña se hashea con bcrypt en el backend antes de escribirse.
 export function UsersPage() {
   const toast = useToast();
-  const [users, setUsers] = useState<User[] | null>(null);
+  const [users, setUsers] = useState<RealUser[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<Role | "TODOS">("TODOS");
+  const [showModal, setShowModal] = useState(false);
 
   function load() {
     setError(null);
     setUsers(null);
-    fetchUsers()
+    fetchRealUsers()
       .then(setUsers)
-      .catch(() => setError("No se pudo cargar la lista de usuarios."));
+      .catch((e) =>
+        setError(e instanceof Error ? e.message : "No se pudo cargar la lista de usuarios.")
+      );
   }
 
   useEffect(load, []);
@@ -35,18 +47,19 @@ export function UsersPage() {
     return users.filter((u) => {
       const matchesRole = roleFilter === "TODOS" || u.rol === roleFilter;
       const q = query.trim().toLowerCase();
-      const matchesQuery = !q || u.nombre.toLowerCase().includes(q) || u.usuario.toLowerCase().includes(q);
+      const matchesQuery =
+        !q || u.nombre.toLowerCase().includes(q) || u.usuario.toLowerCase().includes(q);
       return matchesRole && matchesQuery;
     });
   }, [users, query, roleFilter]);
 
-  async function handleToggle(u: User) {
+  async function handleToggle(u: RealUser) {
     try {
-      await toggleUserActive(u.id);
+      await toggleRealUserActive(u.usuario, !u.activo);
       toast.success(`${u.nombre} ${u.activo ? "desactivado" : "activado"}.`);
       load();
-    } catch {
-      toast.error("No se pudo actualizar el usuario.");
+    } catch (e) {
+      toast.error(e instanceof PreviewApiError ? e.message : "No se pudo actualizar el usuario.");
     }
   }
 
@@ -55,10 +68,12 @@ export function UsersPage() {
       <div className="mb-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-ink-900">Usuarios</h1>
-          <p className="text-sm text-ink-500">Administradores, supervisores e inspectores</p>
+          <p className="text-sm text-ink-500">
+            Base de datos real en Google Sheets — hoja "usuarios"
+          </p>
         </div>
         <button
-          onClick={() => toast.success("Formulario de nuevo usuario (mockup).")}
+          onClick={() => setShowModal(true)}
           className="flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-700"
         >
           <UserPlus size={16} /> Nuevo usuario
@@ -87,10 +102,17 @@ export function UsersPage() {
         </select>
       </div>
 
-      {users === null && !error && <Spinner label="Cargando usuarios..." />}
+      {users === null && !error && <Spinner label="Consultando la BD de usuarios..." />}
       {error && <ErrorState message={error} onRetry={load} />}
       {users !== null && filtered.length === 0 && (
-        <EmptyState title="Sin resultados" description="Ajusta los filtros de búsqueda." />
+        <EmptyState
+          title={users.length === 0 ? "Aún no hay usuarios" : "Sin resultados"}
+          description={
+            users.length === 0
+              ? "Crea el primer usuario con el botón 'Nuevo usuario'."
+              : "Ajusta los filtros de búsqueda."
+          }
+        />
       )}
 
       {users !== null && filtered.length > 0 && (
@@ -109,10 +131,12 @@ export function UsersPage() {
             </thead>
             <tbody className="divide-y divide-ink-100">
               {filtered.map((u) => (
-                <tr key={u.id} className="hover:bg-ink-50/60">
+                <tr key={u.idUsuario} className="hover:bg-ink-50/60">
                   <td className="px-4 py-3">
                     <p className="font-medium text-ink-800">{u.nombre}</p>
-                    <p className="text-xs text-ink-400">{u.usuario} · {u.correo}</p>
+                    <p className="text-xs text-ink-400">
+                      {u.usuario} {u.correo && `· ${u.correo}`}
+                    </p>
                   </td>
                   <td className="px-4 py-3">
                     <Badge tone={ROLE_TONE[u.rol]}>{ROLE_LABEL[u.rol]}</Badge>
@@ -131,16 +155,12 @@ export function UsersPage() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <Badge tone={u.activo ? "green" : "gray"}>{u.activo ? "Activo" : "Inactivo"}</Badge>
+                    <Badge tone={u.activo ? "green" : "gray"}>
+                      {u.activo ? "Activo" : "Inactivo"}
+                    </Badge>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => toast.success("Editar usuario (mockup).")}
-                        className="rounded-lg p-1.5 text-ink-500 hover:bg-ink-100 hover:text-ink-800"
-                      >
-                        <PenSquare size={15} />
-                      </button>
                       <button
                         onClick={() => handleToggle(u)}
                         className={`rounded-lg p-1.5 hover:bg-ink-100 ${
@@ -158,6 +178,151 @@ export function UsersPage() {
           </table>
         </div>
       )}
+
+      {showModal && (
+        <NewUserModal
+          onClose={() => setShowModal(false)}
+          onCreated={() => {
+            setShowModal(false);
+            load();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function NewUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<NewUserPayload>({
+    nombre: "",
+    usuario: "",
+    password: "",
+    rol: "INSPECTOR",
+    correo: "",
+    cargo: "",
+    certificado: "",
+  });
+
+  function set<K extends keyof NewUserPayload>(key: K, value: NewUserPayload[K]) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (form.password.length < 8) {
+      toast.error("La contraseña debe tener al menos 8 caracteres.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await createRealUser(form);
+      toast.success(`Usuario ${form.usuario} creado en la BD.`);
+      onCreated();
+    } catch (err) {
+      toast.error(err instanceof PreviewApiError ? err.message : "No se pudo crear el usuario.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <form
+        onSubmit={handleSubmit}
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-6 shadow-2xl"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-ink-900">Nuevo usuario</h2>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 hover:bg-ink-100">
+            <X size={18} />
+          </button>
+        </div>
+
+        <Field label="Nombre completo *">
+          <input
+            required
+            value={form.nombre}
+            onChange={(e) => set("nombre", e.target.value)}
+            className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600"
+          />
+        </Field>
+        <Field label="Usuario (login) *">
+          <input
+            required
+            value={form.usuario}
+            onChange={(e) => set("usuario", e.target.value.toLowerCase().trim())}
+            className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600"
+          />
+        </Field>
+        <Field label="Contraseña * (mín. 8 caracteres)">
+          <input
+            required
+            type="password"
+            value={form.password}
+            onChange={(e) => set("password", e.target.value)}
+            className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600"
+          />
+        </Field>
+        <Field label="Rol *">
+          <select
+            value={form.rol}
+            onChange={(e) => set("rol", e.target.value)}
+            className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600"
+          >
+            <option value="ADMINISTRADOR">Administrador</option>
+            <option value="SUPERVISOR">Supervisor</option>
+            <option value="INSPECTOR">Inspector</option>
+          </select>
+        </Field>
+        <Field label="Correo">
+          <input
+            type="email"
+            value={form.correo}
+            onChange={(e) => set("correo", e.target.value)}
+            className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600"
+          />
+        </Field>
+        <Field label="Cargo">
+          <input
+            value={form.cargo}
+            onChange={(e) => set("cargo", e.target.value)}
+            className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600"
+          />
+        </Field>
+        <Field label="Certificado">
+          <input
+            value={form.certificado}
+            onChange={(e) => set("certificado", e.target.value)}
+            placeholder="Ej: MT Level II - SNT-TC-1A"
+            className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600"
+          />
+        </Field>
+
+        <p className="mb-4 rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-500">
+          La firma se carga después desde AppSheet (columna tipo Signature) o desde el
+          perfil del usuario cuando esté disponible.
+        </p>
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+        >
+          {saving && <Loader2 size={15} className="animate-spin" />}
+          {saving ? "Guardando en la BD..." : "Crear usuario"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="mb-3 block">
+      <span className="mb-1 block text-sm font-medium text-ink-700">{label}</span>
+      {children}
+    </label>
   );
 }
