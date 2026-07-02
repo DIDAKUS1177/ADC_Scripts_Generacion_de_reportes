@@ -68,7 +68,9 @@ const MAPEO_CELDAS_GENERAL_MT = {
     'tipo_corriente': 'E39',
     'equipo_medicion_luz': 'K39',
     'equipo_luz_sn': 'R39',
+    'observaciones': 'D52',
     'nombre': 'D54',
+    'certificado': 'D55',
     'fecha': 'D57'
 };
 

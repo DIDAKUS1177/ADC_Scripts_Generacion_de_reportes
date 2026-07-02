@@ -7,19 +7,35 @@ real y aparecen en `GET /api/v1/inspections`.
 
 ---
 
-## Paso 3.1 — Credenciales de Google (requiere acción del USUARIO)
+## Paso 3.1 — Credenciales de Google ✅ COMPLETADO (2026-07-02)
 
-Instrucciones que el modelo debe darle al usuario (no puede hacerlas por él):
+- Proyecto GCP: `adcformatos`.
+- Service account: `didakus@adcformatos.iam.gserviceaccount.com`.
+- Credencial guardada en `backend/credentials/service-account.json` (gitignored,
+  verificado que nunca se subió al repo).
+- Google Sheets API habilitada y probada: conexión real exitosa contra el
+  spreadsheet de MT (`1J3FcVxay3dNQMG9SnOwfTccezzuBlaL-PPSiEq7Icy8`), ya compartido
+  con permiso Editor.
+- Pendiente repetir este paso 3.1 para PMI/VT_SOLDADAS/UT_ESPESORES cuando se aborden.
 
-1. Ir a [console.cloud.google.com](https://console.cloud.google.com) → crear proyecto
-   `ademincol-central` (o reusar uno existente).
-2. Habilitar **Google Sheets API**.
-3. Crear **Service Account** → descargar la key JSON.
-4. Guardar el JSON como `backend/credentials/service-account.json`
-   (esta carpeta va en `.gitignore` — VERIFICAR antes de commitear).
-5. Compartir cada Google Sheet fuente (MT, VT, UT...) con el email de la service
-   account (algo como `xxx@ademincol-central.iam.gserviceaccount.com`) con permiso
-   **Editor** (Editor y no Viewer porque el sistema escribe `link_reporte` de vuelta).
+### Hallazgos de la conexión de prueba (2026-07-02)
+
+- Hojas del spreadsheet MT: `1.map`, `2.general_particulas_magneticas`,
+  `3.resultados_inspeccion`, `4.reg_fotografico`, `4.2.reg_calidad`, `5.indicaciones`,
+  `6.complementos`, `FORMATO_MT`.
+- **`1.map` y `6.complementos` son hojas de referencia para AppSheet (listas
+  desplegables, catálogos). Confirmado con el usuario: no son relevantes para el
+  sync — solo sincronizar las hojas que el script GAS ya usa.**
+- El header `observaciones` de `2.general_particulas_magneticas` tiene un **espacio
+  en blanco al final** (`"observaciones "`). El sync DEBE normalizar headers con
+  `.strip().lower()` (ya estaba previsto en el Paso 3.5) — confirmado que es
+  necesario, no opcional.
+- La hoja general tiene ~35 columnas que el script GAS/motor Python actual no usa
+  todavía (variantes `_visible` / `_uva` de partículas y luz, datos de calibración
+  de gausímetro/luxómetros/bloque de peso). No requieren acción ahora — el sync las
+  captura igual dentro del JSONB de `datos_generales` aunque no se mapeen a celdas
+  del Excel. Si el usuario pide automatizarlas en el reporte, se agregan al
+  `MT_CONFIG` sin cambiar el motor.
 
 ## Paso 3.2 — Config de cada tipo de reporte
 
