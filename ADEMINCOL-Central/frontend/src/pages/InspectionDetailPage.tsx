@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Download, FileText, ImageIcon } from "lucide-react";
+import { ArrowLeft, Download, Eye, FileText, ImageIcon } from "lucide-react";
 import { fetchInspectionDetail } from "../mock/client";
 import type { InspectionDetail } from "../types";
 import { Spinner, ErrorState } from "../components/ui/States";
 import { ReportStatusBadge } from "../components/ui/StatusBadge";
 import { useToast } from "../components/ui/Toast";
+import { ReportPreviewModal } from "../components/domain/ReportPreviewModal";
 
 export function InspectionDetailPage() {
   const { id } = useParams();
@@ -15,6 +16,7 @@ export function InspectionDetailPage() {
   const [tab, setTab] = useState<"generales" | "resultados" | "indicaciones" | "fotos" | "historial">(
     "generales"
   );
+  const [showPreview, setShowPreview] = useState(false);
 
   function load() {
     if (!id) return;
@@ -54,8 +56,20 @@ export function InspectionDetailPage() {
             {detail.reportType} · {detail.cliente} · {detail.fecha}
           </p>
         </div>
-        <ReportStatusBadge status={detail.estadoReporte} />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowPreview(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 hover:bg-ink-50"
+          >
+            <Eye size={14} /> Vista previa
+          </button>
+          <ReportStatusBadge status={detail.estadoReporte} />
+        </div>
       </div>
+
+      {showPreview && (
+        <ReportPreviewModal detail={detail} onClose={() => setShowPreview(false)} />
+      )}
 
       <div className="mb-5 flex flex-wrap gap-2 border-b border-ink-200">
         {tabs.map((t) => (
