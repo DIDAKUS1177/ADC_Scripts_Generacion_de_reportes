@@ -22,16 +22,20 @@ Leer `ADEMINCOL-Scripts/APP022_Partic_Magn_MT.js` antes de empezar. El flujo GAS
 
 El motor Python replica esto con plantillas `.xlsx` locales.
 
-## Paso 4.1 — Obtener las plantillas (requiere acción del USUARIO)
+## Paso 4.1 — Plantillas
 
-Pedir al usuario que descargue como `.xlsx` cada hoja FORMATO desde los spreadsheets
-de Google (Archivo → Descargar → Microsoft Excel) y las entregue. Guardarlas en:
+`backend/app/templates_xlsx/MT.xlsx` ya está en el repo (entregada por el usuario el
+2026-07-02, copiada desde `ADEMINCOL-Scripts/APP022_Partic_Magn_MT/formato excel MT.xlsx`).
+Verificada con `openpyxl`: 1 hoja `FORMATO_MT`, rango `A1:T57`, 145 rangos combinados,
+coincide con la lógica de `APP022_Partic_Magn_MT.js`.
 
+Pendientes de pedir al usuario cuando se aborden esos tipos de reporte:
 ```
 backend/app/templates_xlsx/
-├── MT.xlsx            (hoja FORMATO_MT)
-├── VT_SOLDADAS.xlsx
-└── UT_ESPESORES.xlsx
+├── MT.xlsx            ✅ recibida
+├── PMI.xlsx            ⏳ pedir (2º en el orden, ver 00_ARQUITECTURA.md D7)
+├── VT_SOLDADAS.xlsx     ⏳ pedir
+└── UT_ESPESORES.xlsx    ⏳ pedir
 ```
 
 ⚠️ Al descargar de Sheets, verificar que las celdas combinadas y anchos de columna
@@ -39,15 +43,39 @@ sobrevivieron (abrir en Excel y comparar contra el original).
 
 ## Paso 4.2 — Config declarativa por tipo de reporte
 
-`backend/app/services/report_configs/mt.py` — traducción directa de las constantes GAS:
+`backend/app/services/report_configs/mt.py` — **verificada celda por celda contra
+`backend/app/templates_xlsx/MT.xlsx` con openpyxl el 2026-07-02** (no es una traducción
+a ciegas del GAS: se abrió el archivo real, se listaron los 145 merges y se confirmó
+que cada celda de valor es la esquina superior-izquierda de su rango combinado).
 
 ```python
 MT_CONFIG = {
     "template": "MT.xlsx",
     "celdas_generales": {
-        # copiar MAPEO_CELDAS_GENERAL_MT de APP022_Partic_Magn_MT.js tal cual
         "cliente": "C7", "contrato": "H7", "ot": "K7",
-        # ... (completo, no abreviar)
+        "fecha_actividad": "N7", "reporte_n": "R7",
+        "zona": "C9", "sistema": "I9", "subsistema_linea": "O9",
+        "departamento": "C11", "municipio": "I11", "pk_sistema": "O11",
+        "distancia_registro": "S11",
+        "descripcion_elemento": "F15", "acabado_superficial": "R15",
+        "material": "D17", "espesor": "J17", "diametro": "N17",
+        "cantidad_inspeccionada": "S17", "plano_referencia": "D19",
+        "procedimiento_n": "E23", "revision": "K23", "norma_codigo_ref": "Q23",
+        "tecnica_magnetizacion": "E25", "fuerza_campo": "L25", "direccion_campo": "S25",
+        "tecnica_desmagnetizacion": "F27",
+        "tipo_particulas": "D31", "metodo_aplicacion": "K31",
+        "color_particulas": "O31", "tipo_luz_negra": "T31",
+        "marca_equipo": "E33", "codigo_equipo": "P33",
+        "marca_particulas": "E35", "codigo_particulas": "R35",
+        "intensidad_luz_blanca": "E37", "intensidad_luz_negra": "R37",
+        "tipo_corriente": "E39", "equipo_medicion_luz": "K39", "equipo_luz_sn": "R39",
+        # Confirmado con el usuario 2026-07-02 — ambos vienen de la hoja
+        # "2.general_particulas_magneticas" (columnas 'observaciones' y 'certificado').
+        # El script GAS actual NO los llena; el motor Python sí (mejora sobre el proceso actual).
+        "observaciones": "D52",
+        "nombre": "D54",
+        "certificado": "D55",
+        "fecha": "D57",
     },
     # Firma: PRIORIDAD 1 = users.firma_base64 del usuario cuyo nombre coincide con
     # el campo 'nombre' de los datos generales (match por nombre normalizado).
@@ -55,21 +83,26 @@ MT_CONFIG = {
     # como hacen hoy los scripts GAS. Registrar en el log cuál vía se usó.
     "firma": {"celda": "D56", "campo_fallback": "firma_link"},
     "tabla_resultados": {
-        "fila_inicio": 44,
+        "fila_inicio": 44,   # confirmado: filas de plantilla 44-45, altura 30px c/u
         "columnas": {  # campo del JSONB → columna del Excel
             "item": "A", "identificacion": "B", "zona_insp_distancia": "E",
             "diam_long": "G", "evaluacion": "O", "observaciones": "Q",
         },
-        "indicaciones": {   # específico de MT: 3 indicaciones por fila
+        "indicaciones": {   # específico de MT: 3 indicaciones por fila, columnas SIN merge
             "max_por_fila": 3,
-            "columnas": [("I","J"), ("K","L"), ("M","N")],
+            "columnas": [("I", "J"), ("K", "L"), ("M", "N")],
         },
     },
     "fotos": {
+        # confirmado: fila 49 (alto 221px, foto) + fila 50 (alto 19.5px, descripción)
+        # foto izquierda ocupa A49:K49 combinado, foto derecha L49:T49 combinado
         "fila_base_foto": 49, "fila_base_desc": 50,
         "por_fila": 2,
         "columnas_foto": ["A", "L"], "columnas_desc": ["B", "M"],
     },
+    # NOTA: la sección "6. ESQUEMA DE INSPECCIÓN" (fila 46-47, alto 259px) NO está
+    # automatizada — ni en el GAS actual ni aquí. Es un espacio para dibujo/anexo manual.
+    # No requiere config a menos que el usuario pida automatizarla más adelante.
 }
 ```
 
