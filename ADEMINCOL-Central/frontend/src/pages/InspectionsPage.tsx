@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Search, Sparkles, Eye, Download, Link2, RefreshCw } from "lucide-react";
+import { Search, Sparkles, Eye, Download, Link2, RefreshCw, RadioTower } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { ReportStatusBadge } from "../components/ui/StatusBadge";
@@ -108,16 +108,25 @@ export function InspectionsPage() {
             Datos sincronizados desde Google Sheets (AppSheet)
           </p>
         </div>
-        {canManage && (
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="flex items-center gap-2 self-start rounded-lg border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 hover:bg-ink-50 disabled:opacity-60"
+        <div className="flex items-center gap-2 self-start">
+          <Link
+            to="/preview-real-mt"
+            className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
           >
-            <RefreshCw size={15} className={syncing ? "animate-spin" : ""} />
-            {syncing ? "Sincronizando..." : "Sincronizar ahora"}
-          </button>
-        )}
+            <RadioTower size={15} />
+            Ver datos reales (Sheets MT)
+          </Link>
+          {canManage && (
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="flex items-center gap-2 rounded-lg border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 hover:bg-ink-50 disabled:opacity-60"
+            >
+              <RefreshCw size={15} className={syncing ? "animate-spin" : ""} />
+              {syncing ? "Sincronizando..." : "Sincronizar ahora"}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
