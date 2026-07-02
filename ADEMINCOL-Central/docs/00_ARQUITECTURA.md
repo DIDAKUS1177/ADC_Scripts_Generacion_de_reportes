@@ -36,7 +36,7 @@ Razones:
 | BD | PostgreSQL | 15 |
 | Frontend | React 18 + TypeScript + Vite + Tailwind CSS | Node 20 |
 | Auth | JWT (access 30 min + refresh 7 días) con `python-jose` | — |
-| Passwords | `passlib[bcrypt]` | — |
+| Passwords | `bcrypt` (directo, NO `passlib` — bug de compat. con bcrypt>=4.1, ver 02_BACKEND_FASTAPI.md) | — |
 | Excel | `openpyxl` | 3.1+ |
 | Sheets API | `google-api-python-client` + service account | — |
 | Contenedores | Docker Compose | — |
@@ -89,6 +89,32 @@ admin también puede subirla por cualquier usuario).
 `ADEMINCOL-Central/` vive DENTRO de `ADEMINCOL-Scripts/` (repositorio Git
 `ADC_Scripts_Generacion_de_reportes`), que es el resguardo principal. Cualquier
 modificación de arquitectura se hace en los docs de esta carpeta.
+
+### D10. Backend de preview (temporal, sin BD) — ya construido
+Antes de llegar a la Fase 1, se construyó `backend/app/main.py` + `report_engine_mt.py`:
+lee Google Sheets en vivo (sin caché, sin auth) y genera el reporte MT REAL con la
+plantilla verificada (`templates_xlsx/MT.xlsx`), incluyendo imágenes centradas y filas
+dinámicas — ver `backend/README.md`. El frontend lo consume en la pestaña MT de
+Inspecciones (`components/domain/RealMtInspectionsPanel.tsx`), que reemplazó los datos
+simulados de MT (el mock de PMI/VT/UT sigue vigente hasta que se conecten).
+**Este motor de reportes YA resuelve gran parte de la Fase 4 para MT** — cuando se
+llegue a esa fase, se generaliza (config por tipo) en vez de reescribirse desde cero.
+
+### D11. Usuarios/OTs: BD temporal en Google Sheets + AppSheet (decidido por el usuario, 2026-07-02)
+Antes de construir PostgreSQL (Fase 1), se prueba todo el flujo de usuarios/roles/firmas/OTs
+con una hoja de Google Sheets administrada por AppSheet — ver `sheets-db/CrearHojasBD.gs`.
+Razones: cero fricción de infraestructura para probar, AppSheet da captura gratis, y las
+columnas están diseñadas idénticas a `users`/`work_orders` en `01_BASE_DE_DATOS.md`, así
+que migrar a Postgres después es copiar filas, no rediseñar.
+- Las hojas creadas: `usuarios` (con columna `firma` tipo Signature de AppSheet) y
+  `work_orders`, mismas columnas que las tablas Postgres ya documentadas.
+- `password_hash` se genera con `sheets-db/hashear_password.py` (bcrypt directo) y se
+  pega manualmente — AppSheet no tiene funciones de hash, por eso este paso es aparte.
+- **Esto NO reemplaza el plan de PostgreSQL** — es el "gemelo" de prueba que el usuario
+  pidió explícitamente. Cuando se construya la Fase 1 real, este Sheet se usa como fuente
+  para poblar la BD real (mismo patrón que el sync de MT).
+- ⚠️ `passlib[bcrypt]` NO FUNCIONA (ver D-nota en Paso 2.4 de `02_BACKEND_FASTAPI.md`) —
+  usar `bcrypt` directo en cualquier lugar que necesite hashear contraseñas.
 
 ---
 
@@ -169,7 +195,8 @@ Con JSONB:
 
 - ❌ NO modificar los Google Sheets existentes (estructura, nombres de hojas, columnas).
 - ❌ NO tocar los scripts GAS actuales: siguen operativos como respaldo durante la migración.
-- ❌ NO guardar contraseñas en texto plano ni usar MD5. Solo bcrypt via passlib.
+- ❌ NO guardar contraseñas en texto plano ni usar MD5. Solo `bcrypt` directo (no `passlib`).
+- ❌ NO usar `passlib[bcrypt]` — falla con bcrypt>=4.1 (ver 02_BACKEND_FASTAPI.md, Paso 2.4).
 - ❌ NO hardcodear IDs de Spreadsheets, credenciales ni rutas: todo por variables de entorno.
 - ❌ NO usar SQLite "mientras tanto": PostgreSQL desde el día 1 (Docker lo hace trivial).
 - ❌ NO crear tablas por cada tipo de inspección: usar JSONB (sección 4).

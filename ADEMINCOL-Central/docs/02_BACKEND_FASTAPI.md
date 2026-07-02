@@ -50,7 +50,7 @@ psycopg2-binary
 alembic
 pydantic-settings
 python-jose[cryptography]
-passlib[bcrypt]
+bcrypt
 python-multipart
 google-api-python-client
 google-auth
@@ -80,17 +80,27 @@ CORS_ORIGINS=http://localhost:5173
 
 ## Paso 2.4 — Seguridad
 
+⚠️ **NO usar `passlib[bcrypt]`.** Se probó el 2026-07-02 (script
+`sheets-db/hashear_password.py`) y falla con
+`ValueError: password cannot be longer than 72 bytes` incluso con
+contraseñas cortas — bug de compatibilidad conocido entre passlib 1.7.x y
+bcrypt>=4.1 (passlib espera el atributo `bcrypt.__about__.__version__` que
+ya no existe). Usar la librería `bcrypt` directamente, es igual de segura y
+no tiene el problema:
+
 `core/security.py`:
 
 ```python
-from passlib.context import CryptContext
+import bcrypt
 from jose import jwt
 from datetime import datetime, timedelta, timezone
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hash_password(plain: str) -> str:
+    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-def hash_password(plain: str) -> str: ...
-def verify_password(plain: str, hashed: str) -> bool: ...
+def verify_password(plain: str, hashed: str) -> bool:
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+
 def create_access_token(user_id: int, rol: str) -> str: ...
 def create_refresh_token(user_id: int) -> str: ...
 ```
