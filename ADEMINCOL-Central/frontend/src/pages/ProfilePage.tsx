@@ -2,11 +2,30 @@ import { Signature, Mail, Briefcase, ShieldCheck } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABEL } from "../components/layout/navConfig";
 import { useToast } from "../components/ui/Toast";
+import { useState } from "react";
+import { updateRealUserFirma } from "../api/previewClient";
+import { SignaturePad } from "../components/ui/SignaturePad";
 
 export function ProfilePage() {
   const { user } = useAuth();
   const toast = useToast();
+  const [showPad, setShowPad] = useState(false);
+  const [saving, setSaving] = useState(false);
   if (!user) return null;
+
+  async function handleSaveFirma(base64: string) {
+    setSaving(true);
+    try {
+      await updateRealUserFirma(user!.usuario, base64);
+      toast.success("Firma guardada correctamente. El sistema la usará en los próximos reportes.");
+      setShowPad(false);
+      // Idealmente recargar el contexto del usuario aquí
+    } catch (e) {
+      toast.error("Error al guardar la firma");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="max-w-xl">
@@ -33,21 +52,36 @@ export function ProfilePage() {
           <p className="mb-2 flex items-center gap-2 text-sm font-semibold text-ink-800">
             <Signature size={16} /> Firma digital
           </p>
-          {user.tieneFirma ? (
-            <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-ink-200 bg-ink-50 text-xs text-ink-400">
-              Vista previa de firma (mockup)
+          {showPad ? (
+            <div className="mb-3">
+              <SignaturePad onSave={handleSaveFirma} onClear={() => {}} />
+              {saving && <p className="mt-1 text-xs text-ink-500">Guardando...</p>}
+              <button
+                onClick={() => setShowPad(false)}
+                className="mt-2 text-xs text-ink-400 hover:text-ink-600 underline"
+              >
+                Cancelar
+              </button>
             </div>
           ) : (
-            <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-3 text-xs text-amber-700">
-              Aún no has cargado tu firma. Es necesaria para generar reportes con tu nombre.
-            </div>
+            <>
+              {user.tieneFirma ? (
+                <div className="flex h-24 items-center justify-center rounded-lg border border-dashed border-ink-200 bg-ink-50 text-xs text-ink-400">
+                  Firma registrada (lista para reportes)
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-3 text-xs text-amber-700">
+                  Aún no has cargado tu firma. Es necesaria para generar reportes con tu nombre.
+                </div>
+              )}
+              <button
+                onClick={() => setShowPad(true)}
+                className="mt-3 rounded-lg border border-ink-200 px-3.5 py-2 text-sm font-medium text-ink-700 hover:bg-ink-50"
+              >
+                {user.tieneFirma ? "Actualizar firma" : "Configurar firma"}
+              </button>
+            </>
           )}
-          <button
-            onClick={() => toast.success("Selector de imagen (mockup).")}
-            className="mt-3 rounded-lg border border-ink-200 px-3.5 py-2 text-sm font-medium text-ink-700 hover:bg-ink-50"
-          >
-            {user.tieneFirma ? "Actualizar firma" : "Subir firma"}
-          </button>
         </div>
       </div>
     </div>

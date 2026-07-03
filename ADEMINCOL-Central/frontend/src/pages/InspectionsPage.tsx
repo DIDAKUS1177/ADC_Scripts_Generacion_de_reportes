@@ -8,6 +8,7 @@ import { Spinner, EmptyState, ErrorState } from "../components/ui/States";
 import { fetchInspections, generateReport, runSync } from "../mock/client";
 import type { InspectionListItem, ReportTypeCode } from "../types";
 import { RealMtInspectionsPanel } from "../components/domain/RealMtInspectionsPanel";
+import { RealPmiInspectionsPanel } from "../components/domain/RealPmiInspectionsPanel";
 
 const TYPE_TABS: { code: ReportTypeCode | "TODOS"; label: string }[] = [
   { code: "TODOS", label: "Todos" },
@@ -109,7 +110,7 @@ export function InspectionsPage() {
             Datos sincronizados desde Google Sheets (AppSheet)
           </p>
         </div>
-        {tab !== "MT" && canManage && (
+        {tab !== "MT" && tab !== "PMI" && canManage && (
           <button
             onClick={handleSync}
             disabled={syncing}
@@ -139,6 +140,8 @@ export function InspectionsPage() {
 
       {tab === "MT" ? (
         <RealMtInspectionsPanel />
+      ) : tab === "PMI" ? (
+        <RealPmiInspectionsPanel />
       ) : (
         <>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

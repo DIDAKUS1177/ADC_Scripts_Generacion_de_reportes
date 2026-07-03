@@ -8,18 +8,14 @@ construye en la Fase 4.
 """
 import io
 import logging
-import re
 from copy import copy
 from pathlib import Path
 
-import httpx
 from openpyxl import load_workbook
-from openpyxl.drawing.image import Image as XLImage
-from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
-from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.utils import get_column_letter
-from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
-from openpyxl.utils.units import pixels_to_EMU
+from openpyxl.utils.cell import coordinate_from_string
+
+from .image_utils import descargar_imagen, insertar_imagen_centrada
 
 logger = logging.getLogger("report_engine_mt")
 
@@ -125,82 +121,6 @@ def _copiar_estilo_fila(ws, fila_origen: int, fila_destino: int, max_col: int = 
         destino.fill = copy(origen.fill)
         destino.alignment = copy(origen.alignment)
         destino.number_format = origen.number_format
-
-
-def _drive_url_a_descarga(url: str) -> str | None:
-    if not url:
-        return None
-    url = url.strip()
-    if not url:
-        return None
-    if "drive.google.com" in url:
-        m = re.search(r"id=([^&]+)", url) or re.search(r"/d/([^/]+)", url)
-        if m:
-            return f"https://drive.google.com/uc?export=download&id={m.group(1)}"
-    return url if url.startswith("http") else None
-
-
-def _descargar_imagen(url: str) -> bytes | None:
-    final_url = _drive_url_a_descarga(url)
-    if not final_url:
-        return None
-    try:
-        resp = httpx.get(final_url, timeout=15, follow_redirects=True)
-        if resp.status_code == 200 and resp.content:
-            return resp.content
-    except Exception:
-        logger.warning("No se pudo descargar imagen: %s", url)
-    return None
-
-
-def _insertar_imagen_centrada(ws, image_bytes: bytes, celda_ancla: str):
-    """Inserta una imagen flotante centrada en el área de la celda (o su rango
-    combinado), replicando el fix ya aplicado en los scripts GAS."""
-    col_letra, fila_num = coordinate_from_string(celda_ancla)
-    col_idx = column_index_from_string(col_letra)
-
-    destino = (col_idx, fila_num, col_idx, fila_num)
-    for rng in ws.merged_cells.ranges:
-        if rng.min_col <= col_idx <= rng.max_col and rng.min_row <= fila_num <= rng.max_row:
-            destino = (rng.min_col, rng.min_row, rng.max_col, rng.max_row)
-            break
-
-    min_col, min_row, max_col, max_row = destino
-    ancho_area = sum(
-        (ws.column_dimensions[chr(64 + c)].width if c <= 26 else 8.43) or 8.43
-        for c in range(min_col, max_col + 1)
-    ) * 7
-    alto_area = sum(
-        (ws.row_dimensions[r].height or 15) for r in range(min_row, max_row + 1)
-    ) * 96 / 72
-
-    try:
-        img = XLImage(io.BytesIO(image_bytes))
-    except Exception:
-        logger.warning("Imagen inválida, se omite")
-        return
-
-    margen = 4
-    escala = min(
-        max(ancho_area - margen, 20) / img.width,
-        max(alto_area - margen, 20) / img.height,
-    )
-    ancho_final = round(img.width * escala)
-    alto_final = round(img.height * escala)
-    img.width = ancho_final
-    img.height = alto_final
-
-    offset_x = max(0, round((ancho_area - ancho_final) / 2))
-    offset_y = max(0, round((alto_area - alto_final) / 2))
-
-    marker = AnchorMarker(
-        col=min_col - 1, colOff=pixels_to_EMU(offset_x),
-        row=min_row - 1, rowOff=pixels_to_EMU(offset_y),
-    )
-    size = XDRPositiveSize2D(cx=pixels_to_EMU(ancho_final), cy=pixels_to_EMU(alto_final))
-    img.anchor = OneCellAnchor(_from=marker, ext=size)
-
-    ws.add_image(img)
 
 
 def generar_reporte_mt(
@@ -311,19 +231,19 @@ def generar_reporte_mt(
 
     # ---- Fase 5: insertar imágenes (firma + fotos), ya con todas las filas en su lugar final ----
     _reportar(30, "Insertando firma")
-    firma_bytes = _descargar_imagen(fila_general.get("firma_link", ""))
+    firma_bytes = descargar_imagen(fila_general.get("firma_link", ""))
     if firma_bytes:
         col_firma, fila_firma = coordinate_from_string(CELDA_FIRMA)
-        _insertar_imagen_centrada(ws, firma_bytes, f"{col_firma}{fila_final(fila_firma)}")
+        insertar_imagen_centrada(ws, firma_bytes, f"{col_firma}{fila_final(fila_firma)}")
 
     # La descarga de fotos es donde va casi todo el tiempo: 35% → 95%
     for idx, foto in enumerate(fotos):
         pct = 35 + round((idx / max(len(fotos), 1)) * 60)
         _reportar(pct, f"Descargando foto {idx + 1} de {len(fotos)}")
-        img_bytes = _descargar_imagen(foto.get("url") or "")
+        img_bytes = descargar_imagen(foto.get("url") or "")
         if img_bytes:
             f_foto, col_foto = fila_foto_por_indice[idx]
-            _insertar_imagen_centrada(ws, img_bytes, f"{col_foto}{f_foto}")
+            insertar_imagen_centrada(ws, img_bytes, f"{col_foto}{f_foto}")
 
     _reportar(97, "Guardando archivo")
     buffer = io.BytesIO()

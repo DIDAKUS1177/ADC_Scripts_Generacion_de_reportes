@@ -9,6 +9,7 @@ import { UsersPage } from "./pages/UsersPage";
 import { WorkOrdersPage } from "./pages/WorkOrdersPage";
 import { InspectionsPage } from "./pages/InspectionsPage";
 import { InspectionDetailPage } from "./pages/InspectionDetailPage";
+import { EquiposPage } from "./pages/EquiposPage";
 import { SyncPage } from "./pages/SyncPage";
 import { ProfilePage } from "./pages/ProfilePage";
 
@@ -32,6 +33,14 @@ export default function App() {
                 element={
                   <ProtectedRoute roles={["ADMINISTRADOR"]}>
                     <UsersPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/equipos"
+                element={
+                  <ProtectedRoute roles={["ADMINISTRADOR"]}>
+                    <EquiposPage />
                   </ProtectedRoute>
                 }
               />

@@ -1,55 +1,38 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, Eye, ImageIcon, PencilLine } from "lucide-react";
 import {
   downloadJobResult,
-  fetchRealMtInspectionDetail,
-  fetchRealMtInspections,
+  fetchRealPmiInspectionDetail,
+  fetchRealPmiInspections,
   getJobStatus,
   startReportJob,
   PreviewApiError,
-  type MtPreviewDetail,
-  type MtPreviewItem,
+  type PmiPreviewDetail,
+  type PmiPreviewItem,
 } from "../../api/previewClient";
 import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
 import { useToast } from "../ui/Toast";
 
-// Panel de datos REALES de MT (Google Sheets, sin BD, sin auth). Los datos
-// generales son editables antes de generar: los cambios se aplican SOLO al
-// reporte generado (no se escriben de vuelta al Sheet). La generación es
-// asíncrona con barra de progreso (polling del job cada 700 ms).
-export function RealMtInspectionsPanel() {
+// Panel de datos REALES de PMI — Caracterización de Materiales (Google
+// Sheets, sin BD, sin auth). Mismo patrón que RealMtInspectionsPanel:
+// datos generales editables (solo afectan el reporte generado) + barra de
+// progreso con polling del job.
+export function RealPmiInspectionsPanel() {
   const toast = useToast();
-  const [items, setItems] = useState<MtPreviewItem[] | null>(null);
+  const [items, setItems] = useState<PmiPreviewItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<MtPreviewDetail | null>(null);
+  const [detail, setDetail] = useState<PmiPreviewDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [job, setJob] = useState<{ pct: number; etapa: string } | null>(null);
   const pollRef = useRef<number | null>(null);
-  const [query, setQuery] = useState("");
-
-  const filtered = useMemo(() => {
-    if (!items) return null;
-    const q = query.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((it) => {
-      return (
-        String(it.idInforme || "").toLowerCase().includes(q) ||
-        String(it.cliente || "").toLowerCase().includes(q) ||
-        String(it.reporteN || "").toLowerCase().includes(q) ||
-        String(it.sistema || "").toLowerCase().includes(q) ||
-        String(it.inspector || "").toLowerCase().includes(q) ||
-        String(it.fecha || "").toLowerCase().includes(q)
-      );
-    });
-  }, [items, query]);
 
   function load() {
     setError(null);
     setItems(null);
-    fetchRealMtInspections()
+    fetchRealPmiInspections()
       .then(setItems)
       .catch((e) => setError(e instanceof Error ? e.message : "Error desconocido"));
   }
@@ -61,12 +44,12 @@ export function RealMtInspectionsPanel() {
     };
   }, []);
 
-  function openDetail(idInforme: string) {
-    setSelected(idInforme);
+  function openDetail(idGeneral: string) {
+    setSelected(idGeneral);
     setDetail(null);
     setDetailError(null);
     setEdits({});
-    fetchRealMtInspectionDetail(idInforme)
+    fetchRealPmiInspectionDetail(idGeneral)
       .then(setDetail)
       .catch((e) => setDetailError(e instanceof Error ? e.message : "Error desconocido"));
   }
@@ -75,7 +58,7 @@ export function RealMtInspectionsPanel() {
     if (!selected || job) return;
     setJob({ pct: 0, etapa: "Iniciando..." });
     try {
-      const jobId = await startReportJob("mt", selected, edits);
+      const jobId = await startReportJob("pmi", selected, edits);
       pollRef.current = window.setInterval(async () => {
         try {
           const status = await getJobStatus(jobId);
@@ -87,7 +70,7 @@ export function RealMtInspectionsPanel() {
           pollRef.current = null;
           if (status.estado === "DONE") {
             setJob({ pct: 100, etapa: "Descargando..." });
-            await downloadJobResult(jobId, "mt", selected);
+            await downloadJobResult(jobId, "pmi", selected);
             toast.success("Reporte generado y descargado.");
           } else {
             toast.error(status.error || "Error al generar el reporte.");
@@ -110,67 +93,49 @@ export function RealMtInspectionsPanel() {
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (items !== null && items.length === 0) {
     return (
-      <EmptyState title="Sin informes" description="La hoja general no tiene id_informe con datos." />
+      <EmptyState title="Sin informes" description="La hoja 1_general no tiene id_general con datos." />
     );
   }
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <div className="max-h-[70vh] flex flex-col rounded-xl border border-ink-200 bg-white">
-        <div className="border-b border-ink-200 p-3">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por ID, cliente, sistema, inspector, fecha..."
-            className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
-          />
-        </div>
-        <div className="overflow-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-ink-50 text-left text-xs font-semibold uppercase text-ink-500 shadow-sm">
-              <tr>
-                <th className="px-4 py-2.5">ID Informe</th>
-                <th className="px-4 py-2.5">Cliente</th>
-                <th className="px-4 py-2.5">Fecha</th>
-                <th className="px-4 py-2.5">Sistema</th>
-                <th className="px-4 py-2.5">Inspector</th>
-                <th className="px-4 py-2.5">Estado</th>
-                <th className="px-4 py-2.5"></th>
+      <div className="max-h-[70vh] overflow-auto rounded-xl border border-ink-200 bg-white">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-ink-50 text-left text-xs font-semibold uppercase text-ink-500">
+            <tr>
+              <th className="px-4 py-2.5">ID Informe</th>
+              <th className="px-4 py-2.5">Cliente</th>
+              <th className="px-4 py-2.5">OT</th>
+              <th className="px-4 py-2.5">Estado</th>
+              <th className="px-4 py-2.5"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-ink-100">
+            {items?.map((it) => (
+              <tr
+                key={it.id}
+                className={`cursor-pointer hover:bg-ink-50/60 ${
+                  selected === it.idInforme ? "bg-brand-50" : ""
+                }`}
+                onClick={() => openDetail(it.idInforme)}
+              >
+                <td className="px-4 py-2.5 font-mono text-xs text-ink-800">{it.idInforme}</td>
+                <td className="px-4 py-2.5 text-ink-600">{it.cliente ?? "-"}</td>
+                <td className="px-4 py-2.5 max-w-[160px] truncate text-ink-600" title={it.workOrderNumero ?? ""}>
+                  {it.workOrderNumero ?? "-"}
+                </td>
+                <td className="px-4 py-2.5">
+                  <Badge tone={it.estadoReporte === "GENERADO" ? "green" : "gray"}>
+                    {it.estadoReporte === "GENERADO" ? "Generado" : "Pendiente"}
+                  </Badge>
+                </td>
+                <td className="px-4 py-2.5 text-ink-400">
+                  <Eye size={14} />
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-100">
-              {filtered?.map((it) => (
-                <tr
-                  key={it.id}
-                  className={`cursor-pointer hover:bg-ink-50/60 ${
-                    selected === it.idInforme ? "bg-brand-50" : ""
-                  }`}
-                  onClick={() => openDetail(it.idInforme)}
-                >
-                  <td className="px-4 py-2.5 font-mono text-xs text-ink-800">{it.idInforme}</td>
-                  <td className="max-w-[100px] truncate px-4 py-2.5 text-ink-600" title={it.cliente || ""}>
-                    {it.cliente ?? "-"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-ink-600">{it.fecha ?? "-"}</td>
-                  <td className="max-w-[100px] truncate px-4 py-2.5 text-ink-600" title={it.sistema || ""}>
-                    {it.sistema ?? "-"}
-                  </td>
-                  <td className="max-w-[100px] truncate px-4 py-2.5 text-ink-600" title={it.inspector || ""}>
-                    {it.inspector ?? "-"}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Badge tone={it.estadoReporte === "GENERADO" ? "green" : "gray"}>
-                      {it.estadoReporte === "GENERADO" ? "Generado" : "Pendiente"}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2.5 text-ink-400">
-                    <Eye size={14} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       <div className="max-h-[70vh] overflow-auto rounded-xl border border-ink-200 bg-white p-5">
@@ -187,7 +152,7 @@ export function RealMtInspectionsPanel() {
               <div>
                 <p className="font-mono text-sm font-bold text-ink-900">{detail.idInforme}</p>
                 <p className="text-xs text-ink-400">
-                  {detail.cliente} · {detail.fecha} · {detail.reporteN}
+                  {detail.cliente} · {detail.fecha}
                 </p>
               </div>
               {!job && (
@@ -227,10 +192,10 @@ export function RealMtInspectionsPanel() {
                 <div key={k}>
                   <p className="mb-0.5 text-ink-400">{k.replace(/_/g, " ")}</p>
                   <input
-                    value={edits[k] ?? (v || "")}
+                    value={edits[k] ?? (v != null ? String(v) : "")}
                     onChange={(e) => setEdits((prev) => ({ ...prev, [k]: e.target.value }))}
                     className={`w-full rounded border px-1.5 py-1 text-xs outline-none focus:border-brand-600 ${
-                      edits[k] !== undefined && edits[k] !== (v || "")
+                      edits[k] !== undefined && edits[k] !== (v != null ? String(v) : "")
                         ? "border-amber-400 bg-amber-50"
                         : "border-ink-200"
                     }`}
@@ -240,17 +205,37 @@ export function RealMtInspectionsPanel() {
             </div>
 
             <p className="mb-2 text-xs font-semibold uppercase text-ink-400">
-              Resultados ({detail.resultados.length})
+              Química ({detail.quimica.length})
             </p>
-            <div className="mb-4 space-y-1">
-              {detail.resultados.map((r, i) => (
-                <div key={i} className="rounded-lg bg-ink-50 px-3 py-2 text-xs">
-                  <span className="font-medium">{r.identificacion}</span> — {r.evaluacion}
-                  {r.observaciones && <span className="text-ink-500"> · {r.observaciones}</span>}
-                </div>
+            <div className="mb-4 flex flex-wrap gap-1.5">
+              {detail.quimica.map((q, i) => (
+                <span key={i} className="rounded-full bg-ink-50 px-2.5 py-1 text-xs">
+                  <span className="font-medium">{q.Elemento || "?"}</span>{" "}
+                  <span className="text-ink-500">{q.Valor}</span>
+                </span>
               ))}
-              {detail.resultados.length === 0 && (
-                <p className="text-xs text-ink-400">Sin resultados registrados.</p>
+              {detail.quimica.length === 0 && (
+                <p className="text-xs text-ink-400">Sin mediciones de química registradas.</p>
+              )}
+            </div>
+
+            <p className="mb-2 text-xs font-semibold uppercase text-ink-400">
+              Durezas ({detail.durezas.length})
+            </p>
+            <div className="mb-4 flex flex-wrap gap-1.5">
+              {detail.durezas.slice(0, 30).map((d, i) => (
+                <span key={i} className="rounded-full bg-ink-50 px-2.5 py-1 text-xs">
+                  {d.Dureza}
+                  {d.ksi ? <span className="text-ink-500"> · {d.ksi} ksi</span> : null}
+                </span>
+              ))}
+              {detail.durezas.length > 30 && (
+                <span className="rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-500">
+                  +{detail.durezas.length - 30} más
+                </span>
+              )}
+              {detail.durezas.length === 0 && (
+                <p className="text-xs text-ink-400">Sin mediciones de dureza registradas.</p>
               )}
             </div>
 

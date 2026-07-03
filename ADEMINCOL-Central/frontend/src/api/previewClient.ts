@@ -19,6 +19,8 @@ export interface MtPreviewItem {
   reporteN: string | null;
   workOrderNumero: string | null;
   estadoReporte: "GENERADO" | "PENDIENTE";
+  sistema: string | null;
+  inspector: string | null;
 }
 
 export interface MtPreviewResultado {
@@ -64,6 +66,56 @@ export async function fetchRealMtInspectionDetail(idInforme: string): Promise<Mt
   return res.json();
 }
 
+// ---- PMI: Caracterización de Materiales ----
+
+export interface PmiPreviewItem {
+  id: string;
+  reportType: "PMI";
+  idInforme: string;
+  cliente: string | null;
+  fecha: string | null;
+  reporteN: string | null;
+  workOrderNumero: string | null;
+  estadoReporte: "GENERADO" | "PENDIENTE";
+  sistema: string | null;
+  inspector: string | null;
+}
+
+export interface PmiPreviewQuimica {
+  Elemento: string;
+  Valor: string;
+}
+
+export interface PmiPreviewDureza {
+  Dureza: string;
+  ksi: string;
+}
+
+export interface PmiPreviewDetail extends PmiPreviewItem {
+  datosGenerales: Record<string, string | number | null>;
+  quimica: PmiPreviewQuimica[];
+  durezas: PmiPreviewDureza[];
+  fotos: MtPreviewFoto[];
+}
+
+export async function fetchRealPmiInspections(): Promise<PmiPreviewItem[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/pmi`);
+  if (!res.ok) {
+    throw new PreviewApiError(
+      "No se pudo conectar con el backend de preview. ¿Está corriendo en el puerto 8000?"
+    );
+  }
+  return res.json();
+}
+
+export async function fetchRealPmiInspectionDetail(idGeneral: string): Promise<PmiPreviewDetail> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/pmi/${encodeURIComponent(idGeneral)}`);
+  if (!res.ok) {
+    throw new PreviewApiError("No se pudo cargar el detalle real de esta caracterización.");
+  }
+  return res.json();
+}
+
 async function leerDetalleError(res: Response, fallback: string): Promise<string> {
   try {
     const body = await res.json();
@@ -82,12 +134,15 @@ export interface JobStatus {
   error: string | null;
 }
 
+export type ReportKind = "mt" | "pmi";
+
 export async function startReportJob(
+  tipo: ReportKind,
   idInforme: string,
   overrides: Record<string, string>
 ): Promise<string> {
   const res = await fetch(
-    `${PREVIEW_API_BASE}/api/preview/mt/${encodeURIComponent(idInforme)}/generar-reporte`,
+    `${PREVIEW_API_BASE}/api/preview/${tipo}/${encodeURIComponent(idInforme)}/generar-reporte`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -105,14 +160,18 @@ export async function getJobStatus(jobId: string): Promise<JobStatus> {
   return res.json();
 }
 
-export async function downloadJobResult(jobId: string, idInforme: string): Promise<void> {
+export async function downloadJobResult(
+  jobId: string,
+  tipo: ReportKind,
+  idInforme: string
+): Promise<void> {
   const res = await fetch(`${PREVIEW_API_BASE}/api/preview/jobs/${jobId}/descargar`);
   if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo descargar el reporte."));
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `Reporte_MT_${idInforme}.xlsx`;
+  a.download = `Reporte_${tipo.toUpperCase()}_${idInforme}.xlsx`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -124,14 +183,25 @@ export async function downloadJobResult(jobId: string, idInforme: string): Promi
 export interface RealUser {
   idUsuario: string;
   nombre: string;
-  usuario: string;
+  usuario: string; // login
   correo: string | null;
   rol: "ADMINISTRADOR" | "SUPERVISOR" | "INSPECTOR";
   cargo: string | null;
-  certificado: string | null;
+  certificado: string | null; // Obsoleto, usar UserCertificate
   tieneFirma: boolean;
   activo: boolean;
   createdAt: string | null;
+}
+
+export interface UserCertificate {
+  idCertificado?: string;
+  usuario: string;
+  nombreCertificado: string;
+  entidadEmisora: string;
+  fechaEmision: string;
+  fechaVencimiento: string;
+  linkPdf: string;
+  createdAt?: string;
 }
 
 export interface NewUserPayload {
@@ -169,6 +239,33 @@ export async function toggleRealUserActive(usuario: string, activo: boolean): Pr
     }
   );
   if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo actualizar el usuario."));
+}
+
+export async function updateRealUserFirma(usuario: string, firmaBase64: string): Promise<void> {
+  const res = await fetch(
+    `${PREVIEW_API_BASE}/api/preview/usuarios/${encodeURIComponent(usuario)}/firma`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ firmaBase64 }),
+    }
+  );
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo actualizar la firma."));
+}
+
+export async function fetchUserCertificates(usuario: string): Promise<UserCertificate[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/usuarios/${encodeURIComponent(usuario)}/certificados`);
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudieron cargar los certificados."));
+  return res.json();
+}
+
+export async function updateUserCertificates(usuario: string, certificados: UserCertificate[]): Promise<void> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/usuarios/${encodeURIComponent(usuario)}/certificados`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ certificados }),
+  });
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudieron actualizar los certificados."));
 }
 
 // ---- Órdenes de Trabajo (BD real en Sheets) ----

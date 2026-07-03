@@ -155,35 +155,10 @@ export const MOCK_WORK_ORDERS: WorkOrder[] = [
 const nombresPersonal = (n: number) =>
   n === 4 ? "Jorge Luis Pérez" : n === 5 ? "Laura Camila Torres" : "Andrés Felipe Gómez";
 
-// Nota: MT ya NO tiene entradas simuladas aquí — se conectó a datos reales
-// de Google Sheets (ver RealMtInspectionsPanel.tsx). PMI/VT/UT siguen mock
-// hasta que se conecten en las próximas iteraciones.
-export const MOCK_INSPECTIONS: InspectionListItem[] = [
-  {
-    id: 105,
-    reportType: "PMI",
-    idInforme: "PMI-2026-0087",
-    cliente: "Ecopetrol S.A. - GRB",
-    fecha: "2026-06-22",
-    reporteN: "RPT-0087",
-    workOrderId: 2,
-    workOrderNumero: "OT-2026-0143",
-    estadoReporte: "GENERADO",
-    syncedAt: "2026-07-02T13:05:00Z",
-  },
-  {
-    id: 106,
-    reportType: "PMI",
-    idInforme: "PMI-2026-0088",
-    cliente: "Ecopetrol S.A. - GRB",
-    fecha: "2026-06-23",
-    reporteN: "RPT-0088",
-    workOrderId: 2,
-    workOrderNumero: "OT-2026-0143",
-    estadoReporte: "GENERADO",
-    syncedAt: "2026-07-02T13:05:00Z",
-  },
-];
+// Nota: MT y PMI ya NO tienen entradas simuladas aquí — se conectaron a
+// datos reales de Google Sheets (ver RealMtInspectionsPanel.tsx y
+// RealPmiInspectionsPanel.tsx). VT/UT siguen mock hasta que se conecten.
+export const MOCK_INSPECTIONS: InspectionListItem[] = [];
 
 const MOCK_DETAILS: Record<number, InspectionDetail> = Object.fromEntries(
   MOCK_INSPECTIONS.map((insp) => {

@@ -5,6 +5,7 @@ import {
   FileSearch,
   RefreshCw,
   UserCircle,
+  Award,
 } from "lucide-react";
 import type { Role } from "../../types";
 import type { ComponentType } from "react";
@@ -19,6 +20,7 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
   ADMINISTRADOR: [
     { to: "/", label: "Dashboard", icon: LayoutDashboard },
     { to: "/usuarios", label: "Usuarios", icon: Users },
+    { to: "/equipos", label: "Equipos", icon: Award },
     { to: "/ots", label: "Órdenes de Trabajo", icon: ClipboardList },
     { to: "/inspecciones", label: "Inspecciones", icon: FileSearch },
     { to: "/sync", label: "Sincronización", icon: RefreshCw },

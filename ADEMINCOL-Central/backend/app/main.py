@@ -15,12 +15,15 @@ from fastapi import Body, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from .report_engine_mt import generar_reporte_mt
+from .report_engine_pmi import calcular_ce, generar_reporte_pmi
 from .sheets_client import (
     BD_SPREADSHEET_ID,
     MT_SPREADSHEET_ID,
+    PMI_SPREADSHEET_ID,
     append_row,
     read_sheet_as_dicts,
     update_cell_by_key,
+    delete_rows_by_key,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -74,6 +77,8 @@ def list_mt_inspections():
                 "workOrderNumero": row.get("ot") or None,
                 "estadoReporte": "GENERADO" if link_reporte else "PENDIENTE",
                 "syncedAt": None,
+                "sistema": row.get("sistema") or None,
+                "inspector": row.get("nombre") or None,
             }
         )
     return items
@@ -193,6 +198,48 @@ CAMPOS_EDITABLES = {
 }
 
 
+def _normalizar_nombre(nombre: str) -> str:
+    return " ".join(str(nombre or "").strip().lower().split())
+
+
+def _buscar_firma_usuario(nombre_inspector: str) -> str | None:
+    """Prioridad 1 de firma (ver decisión D8): busca en la BD de usuarios
+    (hoja `usuarios`, columna `firma` en base64, capturada desde el perfil
+    con SignaturePad) un usuario cuyo nombre coincida con el inspector del
+    informe. Si no hay match o no tiene firma, se devuelve None y el motor
+    usa el fallback (firma_link del Sheet de MT).
+
+    Match tolerante: los nombres casi nunca son idénticos entre el Sheet de
+    MT y la BD de usuarios (confirmado con datos reales — "Diego Alejandro
+    Hernandez" en BD vs "Diego Alejandro Hernandez Blanco" en el informe).
+    Se hace match si el conjunto de palabras del nombre más corto está
+    completamente contenido en el más largo (evita falsos positivos de
+    coincidencias parciales de una sola palabra)."""
+    if not nombre_inspector:
+        return None
+    try:
+        usuarios = read_sheet_as_dicts(BD_SPREADSHEET_ID, "usuarios")
+    except Exception:
+        logger.warning("No se pudo consultar la BD de usuarios para buscar firma")
+        return None
+
+    palabras_objetivo = set(_normalizar_nombre(nombre_inspector).split())
+    if not palabras_objetivo:
+        return None
+
+    for u in usuarios:
+        firma = (u.get("firma") or "").strip()
+        if not firma:
+            continue
+        palabras_bd = set(_normalizar_nombre(u.get("nombre", "")).split())
+        if not palabras_bd:
+            continue
+        corta, larga = (palabras_bd, palabras_objetivo) if len(palabras_bd) <= len(palabras_objetivo) else (palabras_objetivo, palabras_bd)
+        if len(corta) >= 2 and corta.issubset(larga):
+            return firma
+    return None
+
+
 def _job_generar(job_id: str, id_informe: str, overrides: dict):
     job = JOBS[job_id]
     try:
@@ -204,6 +251,12 @@ def _job_generar(job_id: str, id_informe: str, overrides: dict):
             columna = CAMPOS_EDITABLES.get(campo_ui)
             if columna is not None and valor is not None:
                 fila_general[columna] = valor
+
+        # Firma: prioridad a la firma real capturada en el perfil (BD usuarios)
+        # sobre la firma_link que trae el Sheet de MT (ver decisión D8).
+        firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
+        if firma_bd:
+            fila_general["firma_link"] = firma_bd
 
         def progreso(pct: int, etapa: str):
             job.update(pct=pct, etapa=etapa)
@@ -253,6 +306,159 @@ def descargar_job(job_id: str):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{job["nombre"]}"'},
     )
+
+
+# =====================================================================
+# Inspecciones PMI — Caracterización de Materiales (lectura del Sheet real)
+# =====================================================================
+
+@app.get("/api/preview/pmi")
+def list_pmi_inspections():
+    try:
+        rows = read_sheet_as_dicts(PMI_SPREADSHEET_ID, "1_general")
+    except Exception as e:
+        logger.exception("Error leyendo hoja general de PMI")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer el Sheet de PMI: {e}")
+
+    items = []
+    for row in rows:
+        id_general = row.get("id_general", "").strip()
+        if not id_general:
+            continue
+        link_reporte = row.get("link_reporte", "").strip()
+        items.append(
+            {
+                "id": id_general,
+                "reportType": "PMI",
+                "idInforme": id_general,
+                "cliente": row.get("cliente") or None,
+                "fecha": row.get("fecha") or None,
+                "reporteN": row.get("n_reporte") or None,
+                "workOrderId": None,
+                "workOrderNumero": row.get("ot") or None,
+                "estadoReporte": "GENERADO" if link_reporte else "PENDIENTE",
+                "syncedAt": None,
+                "sistema": row.get("sistema") or None,
+                "inspector": row.get("nombre") or None,
+            }
+        )
+    return items
+
+
+def _cargar_datos_pmi(id_general: str):
+    generales = read_sheet_as_dicts(PMI_SPREADSHEET_ID, "1_general")
+    quimica = read_sheet_as_dicts(PMI_SPREADSHEET_ID, "2_quimica")
+    durezas = read_sheet_as_dicts(PMI_SPREADSHEET_ID, "3_durezas")
+
+    fila_general = next(
+        (r for r in generales if r.get("id_general", "").strip() == id_general), None
+    )
+    if not fila_general:
+        raise HTTPException(status_code=404, detail=f"No existe el id_general {id_general}")
+
+    filas_quimica = [r for r in quimica if r.get("id_general", "").strip() == id_general]
+    filas_durezas = [r for r in durezas if r.get("id_general", "").strip() == id_general]
+
+    # read_sheet_as_dicts normaliza headers a minúsculas; el motor PMI y el
+    # cálculo de CE esperan las llaves originales (Elemento, Valor, Dureza,
+    # ksi, etc. con mayúsculas) porque así están en MAPEO_GENERAL/2_quimica
+    # del script GAS. Se reconstruyen aquí con la capitalización esperada.
+    quimica_out = [{"Elemento": r.get("elemento", ""), "Valor": r.get("valor", "")} for r in filas_quimica]
+    durezas_out = [{"Dureza": r.get("dureza", ""), "ksi": r.get("ksi", "")} for r in filas_durezas]
+
+    return fila_general, quimica_out, durezas_out
+
+
+@app.get("/api/preview/pmi/{id_general}")
+def get_pmi_inspection_detail(id_general: str):
+    try:
+        fila_general, quimica, durezas = _cargar_datos_pmi(id_general)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error leyendo hojas de PMI")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer el Sheet de PMI: {e}")
+
+    link_reporte = fila_general.get("link_reporte", "").strip()
+    ce = calcular_ce(quimica)
+
+    return {
+        "id": id_general,
+        "reportType": "PMI",
+        "idInforme": id_general,
+        "cliente": fila_general.get("cliente") or None,
+        "fecha": fila_general.get("fecha") or None,
+        "reporteN": fila_general.get("n_reporte") or None,
+        "workOrderId": None,
+        "workOrderNumero": fila_general.get("ot") or None,
+        "estadoReporte": "GENERADO" if link_reporte else "PENDIENTE",
+        "syncedAt": None,
+        "datosGenerales": {
+            "cliente": fila_general.get("cliente"),
+            "contrato": fila_general.get("contrato"),
+            "ot": fila_general.get("ot"),
+            "fecha": fila_general.get("fecha"),
+            "sistema": fila_general.get("sistema"),
+            "equipo_inspeccionado": fila_general.get("equipo_inspeccionado"),
+            "descripcion_componente": fila_general.get("descripcion_componente"),
+            "estado_componente": fila_general.get("estado_componente"),
+            "material_referencia": fila_general.get("material_referencia"),
+            "nps": fila_general.get("nps"),
+            "espesor_min_pulg": fila_general.get("espesor_min_pulg"),
+            "carbono_equivalente": ce,
+            "inspector": fila_general.get("nombre"),
+        },
+        "quimica": quimica,
+        "durezas": durezas,
+        "fotos": [
+            {"url": fila_general.get(campo, ""), "descripcion": campo}
+            for campo in ("link_foto", "link_imagen_2", "link_imagen_3", "link_imagen_4",
+                          "link_imagen_5", "link_imagen_6", "link_imagen_7", "link_imagen_8",
+                          "link_imagen_9", "link_imagen_10")
+            if fila_general.get(campo, "").strip()
+        ],
+        "historialReportes": [],
+    }
+
+
+def _job_generar_pmi(job_id: str, id_general: str, overrides: dict):
+    job = JOBS[job_id]
+    try:
+        job.update(pct=2, etapa="Leyendo datos del Sheet")
+        fila_general, quimica, durezas = _cargar_datos_pmi(id_general)
+
+        for campo_ui, valor in (overrides or {}).items():
+            if campo_ui in fila_general and valor is not None:
+                fila_general[campo_ui] = valor
+
+        firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
+        if firma_bd:
+            fila_general["link_firma"] = firma_bd
+
+        def progreso(pct: int, etapa: str):
+            job.update(pct=pct, etapa=etapa)
+
+        contenido = generar_reporte_pmi(fila_general, quimica, durezas, progreso=progreso)
+        job.update(
+            estado="DONE", pct=100, etapa="Completado",
+            archivo=contenido, nombre=f"Reporte_PMI_{id_general}.xlsx",
+        )
+    except HTTPException as e:
+        job.update(estado="ERROR", error=e.detail)
+    except Exception as e:
+        logger.exception("Error en job de generación PMI %s", job_id)
+        job.update(estado="ERROR", error=str(e))
+
+
+@app.post("/api/preview/pmi/{id_general}/generar-reporte")
+def iniciar_generacion_pmi(id_general: str, payload: dict = Body(default={})):
+    overrides = payload.get("overrides", {})
+    job_id = uuid.uuid4().hex
+    JOBS[job_id] = {"estado": "RUNNING", "pct": 0, "etapa": "Iniciando", "error": None,
+                    "archivo": None, "nombre": None}
+    thread = threading.Thread(target=_job_generar_pmi, args=(job_id, id_general, overrides), daemon=True)
+    thread.start()
+    return {"jobId": job_id}
 
 
 # =====================================================================
@@ -341,6 +547,70 @@ def toggle_usuario_activo(usuario: str, payload: dict = Body(...)):
         raise HTTPException(status_code=502, detail=f"No se pudo actualizar: {e}")
     if not ok:
         raise HTTPException(status_code=404, detail=f"Usuario '{usuario}' no encontrado")
+    return {"ok": True}
+
+
+@app.patch("/api/preview/usuarios/{usuario}/firma")
+def update_usuario_firma(usuario: str, payload: dict = Body(...)):
+    firma_base64 = payload.get("firmaBase64")
+    if not firma_base64:
+        raise HTTPException(status_code=422, detail="firmaBase64 es requerido")
+    try:
+        ok = update_cell_by_key(BD_SPREADSHEET_ID, "usuarios", "usuario", usuario, "firma", firma_base64)
+    except Exception as e:
+        logger.exception("Error actualizando firma de usuario")
+        raise HTTPException(status_code=502, detail=f"No se pudo actualizar: {e}")
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Usuario '{usuario}' no encontrado")
+    return {"ok": True}
+
+@app.get("/api/preview/usuarios/{usuario}/certificados")
+def list_usuario_certificados(usuario: str):
+    try:
+        rows = read_sheet_as_dicts(BD_SPREADSHEET_ID, "certificados_usuarios")
+    except Exception as e:
+        logger.exception("Error leyendo certificados")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer la BD: {e}")
+
+    out = []
+    for r in rows:
+        if str(r.get("usuario", "")).strip() == usuario:
+            out.append({
+                "idCertificado": r.get("id_certificado"),
+                "usuario": r.get("usuario"),
+                "nombreCertificado": r.get("nombre_certificado"),
+                "entidadEmisora": r.get("entidad_emisora"),
+                "fechaEmision": r.get("fecha_emision"),
+                "fechaVencimiento": r.get("fecha_vencimiento"),
+                "linkPdf": r.get("link_pdf"),
+                "createdAt": r.get("created_at"),
+            })
+    return out
+
+@app.patch("/api/preview/usuarios/{usuario}/certificados")
+def update_usuario_certificados(usuario: str, payload: dict = Body(...)):
+    certificados = payload.get("certificados", [])
+    try:
+        delete_rows_by_key(BD_SPREADSHEET_ID, "certificados_usuarios", "usuario", usuario)
+        for c in certificados:
+            append_row(
+                BD_SPREADSHEET_ID,
+                "certificados_usuarios",
+                {
+                    "id_certificado": c.get("idCertificado") or uuid.uuid4().hex[:8].upper(),
+                    "usuario": usuario,
+                    "nombre_certificado": c.get("nombreCertificado", "").strip(),
+                    "entidad_emisora": c.get("entidadEmisora", "").strip(),
+                    "fecha_emision": c.get("fechaEmision", "").strip(),
+                    "fecha_vencimiento": c.get("fechaVencimiento", "").strip(),
+                    "link_pdf": c.get("linkPdf", "").strip(),
+                    "created_at": c.get("createdAt") or datetime.now().isoformat(timespec="seconds")
+                }
+            )
+    except Exception as e:
+        logger.exception("Error actualizando certificados")
+        raise HTTPException(status_code=502, detail=f"Error actualizando en BD: {e}")
+        
     return {"ok": True}
 
 

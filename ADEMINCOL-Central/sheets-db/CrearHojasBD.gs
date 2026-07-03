@@ -38,6 +38,7 @@ function onOpen() {
 
 const HOJA_USUARIOS = 'usuarios';
 const HOJA_WORK_ORDERS = 'work_orders';
+const HOJA_CERTIFICADOS = 'certificados_usuarios';
 
 // Columnas idénticas a docs/01_BASE_DE_DATOS.md — CREATE TABLE users / work_orders
 const COLUMNAS_USUARIOS = [
@@ -72,6 +73,18 @@ const COLUMNAS_WORK_ORDERS = [
   'created_at',
 ];
 
+// Nueva tabla para múltiples certificados por usuario
+const COLUMNAS_CERTIFICADOS = [
+  'id_certificado',     // texto único, ej. "CERT-001"
+  'usuario',            // FK textual → usuarios.usuario
+  'nombre_certificado', // ej. "MT Nivel II"
+  'entidad_emisora',    // ej. "ASNT"
+  'fecha_emision',      // YYYY-MM-DD
+  'fecha_vencimiento',  // YYYY-MM-DD
+  'link_pdf',           // link al documento escaneado (opcional)
+  'created_at',
+];
+
 const ROLES_VALIDOS = ['ADMINISTRADOR', 'SUPERVISOR', 'INSPECTOR'];
 const ESTADOS_OT_VALIDOS = ['PENDIENTE', 'EN_CURSO', 'COMPLETADA', 'CANCELADA'];
 
@@ -85,9 +98,11 @@ function crearEstructuraBD() {
   const hojaOTs = _crearOReusarHoja(ss, HOJA_WORK_ORDERS, COLUMNAS_WORK_ORDERS);
   _aplicarValidacionLista(hojaOTs, 'estado', COLUMNAS_WORK_ORDERS, ESTADOS_OT_VALIDOS);
 
+  const hojaCertificados = _crearOReusarHoja(ss, HOJA_CERTIFICADOS, COLUMNAS_CERTIFICADOS);
+
   SpreadsheetApp.getUi().alert(
     '✅ Estructura lista',
-    'Hojas "usuarios" y "work_orders" creadas/verificadas.\n\n' +
+    'Hojas "usuarios", "work_orders" y "certificados_usuarios" creadas/verificadas.\n\n' +
       'Siguiente paso: conectar este Sheet a AppSheet y configurar la ' +
       'columna "firma" como tipo Signature.',
     SpreadsheetApp.getUi().ButtonSet.OK

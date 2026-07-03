@@ -5,3 +5,4 @@ google-auth
 openpyxl>=3.1
 Pillow
 httpx
+bcrypt

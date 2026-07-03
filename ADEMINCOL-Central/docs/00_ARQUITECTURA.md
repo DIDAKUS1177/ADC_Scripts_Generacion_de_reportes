@@ -116,6 +116,60 @@ que migrar a Postgres después es copiar filas, no rediseñar.
 - ⚠️ `passlib[bcrypt]` NO FUNCIONA (ver D-nota en Paso 2.4 de `02_BACKEND_FASTAPI.md`) —
   usar `bcrypt` directo en cualquier lugar que necesite hashear contraseñas.
 
+### D12. "Equipos" = equipo de trabajo (certificados de inspectores), NO equipos físicos
+Duda resuelta con el usuario 2026-07-03: la pantalla "Equipos" (`/equipos`,
+`EquiposPage.tsx`) gestiona los **certificados de los inspectores/supervisores**
+(ASNT, SNT-TC-1A, etc.), reutilizando `usuarios` + una tabla nueva
+`certificados_usuarios` (1 usuario → N certificados, con fecha de emisión/vencimiento
+y link a PDF). **No existe ni se necesita una tabla de "equipos físicos" de END** —
+ese concepto no está en el alcance actual. Si en el futuro se requiere inventario de
+equipos de ensayo (durómetros, gausímetros, etc.) con sus propias fechas de calibración,
+sería una tabla nueva y separada (`equipos_ensayo`), no lo que ya existe.
+
+### D13. Firma capturada en el perfil: prioridad sobre firma_link del Sheet — ya conectado
+El `SignaturePad` (`components/ui/SignaturePad.tsx`, canvas HTML5 o subida de imagen)
+guarda la firma en base64 en `usuarios.firma` (BD Sheets). El motor de reportes
+(`_buscar_firma_usuario()` en `main.py`) la usa con **prioridad sobre** `firma_link` del
+Sheet de origen (MT/PMI), buscando por nombre con match tolerante (ver función,
+confirmado el 2026-07-03 que los nombres casi nunca son idénticos entre sistemas —
+ej. "Diego Alejandro Hernandez" en BD vs "...Hernandez Blanco" en el informe — se hace
+match si el nombre más corto está contenido como subconjunto de palabras en el más largo).
+`descargar_imagen()` (en `image_utils.py`) soporta both URLs http(s) y data URIs
+`data:image/...;base64,...`.
+
+### D14. PMI (Caracterización de Materiales) conectado — segundo tipo de reporte real
+Igual que MT: `report_engine_pmi.py` + endpoints `/api/preview/pmi*` +
+`RealPmiInspectionsPanel.tsx`, verificado con datos e imágenes reales el 2026-07-03.
+Diferencias clave frente a MT:
+- Usa **rangos fijos** en la plantilla (química: 18 slots, durezas: 59 slots) — NO hace
+  falta insertar filas dinámicamente, así que no aplica el problema de merges/alturas que
+  tuvo MT.
+- El Carbono Equivalente (CE) se recalcula en Python (`calcular_ce()`) en vez de depender
+  del trigger de Apps Script — el trigger de Sheets solo corre cuando AppSheet escribe,
+  no bajo demanda.
+- Hojas usadas: `1_general`, `2_quimica`, `3_durezas`. Hojas NO usadas por el reporte
+  (confirmado contra el GAS real): `map`, `map_v2`, `0_1_Quimica`, `0_referencias`,
+  `1_1_metalografia`, `1_2_analisis_de_componentes`, `1_2_1_quimica`,
+  `FORMATO_MATERIALES_ADC`, `A370` — catálogos/versiones viejas, mismo patrón que
+  `1.map`/`6.complementos` en el Sheet de MT.
+- Gap conocido heredado del script GAS original (no introducido aquí, documentado en
+  `report_engine_pmi.py`): la tabla de química de la plantilla tiene 21 slots físicos
+  pero el mapeo solo usa 18 — informes con más de 18 elementos analizados pierden los
+  extra, igual que en producción hoy.
+- Dos campos del mapeo original (`1_M_Abrasivo`→F54, `1_M_Res_Vol_Dilusor`→AB76) apuntan
+  a una celda que no es la esquina superior-izquierda de su combinación; se omiten con
+  warning en vez de fallar el reporte completo (openpyxl es más estricto que Sheets aquí).
+
+### D15. Bugs corregidos en la Fase 0/preview que aplican a la futura Fase 4
+- `sheets_client.update_cell_by_key()` solo soportaba columnas A-Z (`chr(65+i)`) — se
+  rompía en hojas anchas como `1_general` (113 columnas, `link_reporte` cae en la
+  columna DH). Reemplazado por `_column_letter()` con conversión base-26 completa.
+- `insertar_imagen_centrada()` (antes duplicada en cada motor, ahora en
+  `image_utils.py` compartido) tenía el mismo límite de una sola letra al calcular el
+  ancho de columna — reemplazado por `get_column_letter()` de openpyxl.
+- Ambos fixes son relevantes para la Fase 4 real: cualquier tipo de reporte con
+  plantillas anchas (>26 columnas) o Sheets con muchas columnas los necesita.
+
 ---
 
 ## 2. Diagrama de componentes

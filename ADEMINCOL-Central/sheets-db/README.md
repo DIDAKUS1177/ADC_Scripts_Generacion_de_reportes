@@ -9,8 +9,12 @@ columnas idénticas a las tablas reales para que migrar después sea trivial.
 1. Crear un Google Sheet nuevo, ej. **"ADEMINCOL_BD_Central"**.
 2. Extensiones → Apps Script → pegar el contenido de `CrearHojasBD.gs`.
 3. Guardar, autorizar, y ejecutar `crearEstructuraBD` una vez. Aparecerán las hojas
-   `usuarios` y `work_orders` con encabezados, validaciones de lista (rol, estado) y
-   casilla (activo).
+   `usuarios`, `work_orders` y `certificados_usuarios` con encabezados, validaciones de
+   lista (rol, estado) y casilla (activo).
+   - `certificados_usuarios` permite varios certificados por usuario (nombre, entidad
+     emisora, fecha de emisión/vencimiento, link al PDF) — ver decisión D12 en
+     `00_ARQUITECTURA.md`: es para certificaciones de personal (ASNT, SNT-TC-1A...),
+     NO para equipos físicos de ensayo.
 4. Ir a [app.appsheet.com](https://app.appsheet.com) → Create → From spreadsheet →
    seleccionar el Sheet.
 5. En AppSheet, editar la columna `firma` de la tabla `usuarios`: tipo **Signature**.
