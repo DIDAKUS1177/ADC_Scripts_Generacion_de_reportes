@@ -1,25 +1,37 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Plus, MapPin, User as UserIcon, X, Loader2 } from "lucide-react";
+import { Plus, MapPin, User as UserIcon, X, Loader2, Wrench, ChevronDown, ChevronUp } from "lucide-react";
 import {
   createRealOT,
+  crearServicio,
   fetchRealOTs,
-  fetchRealUsers,
+  fetchServicios,
   PreviewApiError,
   type NewOTPayload,
   type RealOT,
-  type RealUser,
+  type RealServicio,
+  type Tecnica,
 } from "../api/previewClient";
 import { Spinner, EmptyState, ErrorState } from "../components/ui/States";
 import { OTStatusBadge } from "../components/ui/StatusBadge";
+import { Badge } from "../components/ui/Badge";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/ui/Toast";
 
-// Página conectada a la BD REAL en Google Sheets (hoja "work_orders", decisión D11).
+const TECNICAS_DISPONIBLES: { value: Tecnica; label: string }[] = [
+  { value: "MT", label: "Partículas Magnéticas (MT)" },
+  { value: "PMI", label: "Caracterización de Materiales (PMI)" },
+];
+
+// Página conectada a la BD REAL en Google Sheets (hoja "work_orders" + "servicios").
+// Decisión de la reunión 2026-07-03: el supervisor NUNCA se selecciona (es
+// siempre quien crea la OT); el inspector tampoco se elige aquí — se asigna
+// por servicio, y ese servicio lo autoasigna el inspector desde AppSheet.
 export function WorkOrdersPage() {
   const { user } = useAuth();
   const [ots, setOts] = useState<RealOT[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [expandedOt, setExpandedOt] = useState<string | null>(null);
 
   function load() {
     setError(null);
@@ -84,14 +96,22 @@ export function WorkOrdersPage() {
 
               {ot.descripcion && <p className="mb-4 text-sm text-ink-600">{ot.descripcion}</p>}
 
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ink-100 pt-3 text-xs text-ink-500">
+              <div className="flex items-center justify-between border-t border-ink-100 pt-3 text-xs text-ink-500">
                 <span className="flex items-center gap-1">
-                  <UserIcon size={12} /> Sup: {ot.supervisorUsuario ?? "—"}
+                  <UserIcon size={12} /> Solicitó: {ot.supervisorUsuario ?? "—"}
                 </span>
-                <span className="flex items-center gap-1">
-                  <UserIcon size={12} /> Insp: {ot.inspectorUsuario ?? "—"}
-                </span>
+                <button
+                  onClick={() => setExpandedOt(expandedOt === ot.idOt ? null : ot.idOt)}
+                  className="flex items-center gap-1 rounded-lg px-2 py-1 font-semibold text-brand-700 hover:bg-brand-50"
+                >
+                  <Wrench size={12} /> Servicios
+                  {expandedOt === ot.idOt ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                </button>
               </div>
+
+              {expandedOt === ot.idOt && (
+                <ServiciosDeOt idOt={ot.idOt} canCreate={!!canCreate} />
+              )}
             </div>
           ))}
         </div>
@@ -110,41 +130,100 @@ export function WorkOrdersPage() {
   );
 }
 
+function ServiciosDeOt({ idOt, canCreate }: { idOt: string; canCreate: boolean }) {
+  const toast = useToast();
+  const [servicios, setServicios] = useState<RealServicio[] | null>(null);
+  const [creando, setCreando] = useState<Tecnica | null>(null);
+
+  function load() {
+    fetchServicios(idOt)
+      .then(setServicios)
+      .catch(() => toast.error("No se pudieron cargar los servicios de esta OT."));
+  }
+
+  useEffect(load, [idOt]);
+
+  async function handleGenerarServicio(tecnica: Tecnica) {
+    setCreando(tecnica);
+    try {
+      await crearServicio(idOt, tecnica);
+      toast.success(`Servicio ${tecnica} generado.`);
+      load();
+    } catch (e) {
+      toast.error(e instanceof PreviewApiError ? e.message : "No se pudo generar el servicio.");
+    } finally {
+      setCreando(null);
+    }
+  }
+
+  const tecnicasYaCreadas = new Set((servicios ?? []).map((s) => s.tecnica));
+
+  return (
+    <div className="mt-3 rounded-lg border border-ink-100 bg-ink-50/60 p-3">
+      {servicios === null && <p className="text-xs text-ink-400">Cargando servicios...</p>}
+      {servicios !== null && servicios.length === 0 && (
+        <p className="mb-2 text-xs text-ink-400">Sin servicios generados todavía.</p>
+      )}
+      {servicios !== null &&
+        servicios.map((s) => (
+          <div
+            key={s.idServicio}
+            className="mb-1.5 flex items-center justify-between rounded-md bg-white px-2.5 py-1.5 text-xs"
+          >
+            <div className="flex items-center gap-2">
+              <Badge tone="blue">{s.tecnica}</Badge>
+              <span className="font-mono text-ink-500">{s.idServicio}</span>
+            </div>
+            <div className="flex items-center gap-2 text-ink-500">
+              <span>{s.inspectorUsuario ?? "sin autoasignar"}</span>
+              <OTStatusBadge status={s.estado} />
+            </div>
+          </div>
+        ))}
+
+      {canCreate && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {TECNICAS_DISPONIBLES.filter((t) => !tecnicasYaCreadas.has(t.value)).map((t) => (
+            <button
+              key={t.value}
+              onClick={() => handleGenerarServicio(t.value)}
+              disabled={creando === t.value}
+              className="rounded-md border border-dashed border-ink-300 px-2 py-1 text-[11px] font-medium text-ink-600 hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700 disabled:opacity-50"
+            >
+              {creando === t.value ? "Generando..." : `+ Generar servicio ${t.value}`}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NewOTModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const { user } = useAuth();
   const toast = useToast();
   const [saving, setSaving] = useState(false);
-  const [usuarios, setUsuarios] = useState<RealUser[]>([]);
-  const [form, setForm] = useState<NewOTPayload>({
+  const [form, setForm] = useState<Omit<NewOTPayload, "supervisorUsuario">>({
     numero: "",
     contrato: "",
     cliente: "",
     ubicacion: "",
-    supervisorUsuario: "",
-    inspectorUsuario: "",
     fechaInicio: "",
     fechaFin: "",
     estado: "PENDIENTE",
     descripcion: "",
   });
 
-  useEffect(() => {
-    fetchRealUsers()
-      .then(setUsuarios)
-      .catch(() => setUsuarios([]));
-  }, []);
-
-  const supervisores = usuarios.filter((u) => u.activo && u.rol !== "INSPECTOR");
-  const inspectores = usuarios.filter((u) => u.activo && u.rol === "INSPECTOR");
-
-  function set<K extends keyof NewOTPayload>(key: K, value: NewOTPayload[K]) {
+  function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!user) return;
     setSaving(true);
     try {
-      await createRealOT(form);
+      await createRealOT({ ...form, supervisorUsuario: user.usuario });
       toast.success(`OT ${form.numero} creada en la BD.`);
       onCreated();
     } catch (err) {
@@ -169,6 +248,11 @@ function NewOTModal({ onClose, onCreated }: { onClose: () => void; onCreated: ()
             <X size={18} />
           </button>
         </div>
+
+        <p className="mb-4 rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-500">
+          Solicitante: <span className="font-semibold text-ink-700">{user?.nombre}</span> (tú).
+          Los servicios (MT, PMI...) y el inspector se asignan después de crear la OT.
+        </p>
 
         <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
           <Field label="Número de OT *">
@@ -200,34 +284,6 @@ function NewOTModal({ onClose, onCreated }: { onClose: () => void; onCreated: ()
               onChange={(e) => set("ubicacion", e.target.value)}
               className={inputCls}
             />
-          </Field>
-          <Field label="Supervisor">
-            <select
-              value={form.supervisorUsuario}
-              onChange={(e) => set("supervisorUsuario", e.target.value)}
-              className={inputCls}
-            >
-              <option value="">— Sin asignar —</option>
-              {supervisores.map((u) => (
-                <option key={u.usuario} value={u.usuario}>
-                  {u.nombre}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Inspector">
-            <select
-              value={form.inspectorUsuario}
-              onChange={(e) => set("inspectorUsuario", e.target.value)}
-              className={inputCls}
-            >
-              <option value="">— Sin asignar —</option>
-              {inspectores.map((u) => (
-                <option key={u.usuario} value={u.usuario}>
-                  {u.nombre}
-                </option>
-              ))}
-            </select>
           </Field>
           <Field label="Fecha inicio">
             <input

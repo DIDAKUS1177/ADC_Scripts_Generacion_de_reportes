@@ -105,7 +105,7 @@ export function InspectionsPage() {
     <div>
       <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-ink-900">Inspecciones</h1>
+          <h1 className="text-2xl font-bold text-ink-900">Reportes</h1>
           <p className="text-sm text-ink-500">
             Datos sincronizados desde Google Sheets (AppSheet)
           </p>

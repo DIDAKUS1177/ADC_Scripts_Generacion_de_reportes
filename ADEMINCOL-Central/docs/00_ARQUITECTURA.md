@@ -170,6 +170,42 @@ Diferencias clave frente a MT:
 - Ambos fixes son relevantes para la Fase 4 real: cualquier tipo de reporte con
   plantillas anchas (>26 columnas) o Sheets con muchas columnas los necesita.
 
+### D16. Modelo OT → Servicio → Técnica (reunión con el jefe, 2026-07-03)
+Redefinición del flujo de creación de trabajo, a partir de retroalimentación directa
+del jefe (ver `docs/ESTANDAR_COLUMNAS_APPSHEET.md` para el detalle de columnas y el
+paso a paso de AppSheet):
+
+- **La OT ya no lleva supervisor ni inspector seleccionables.** El supervisor de una OT
+  es siempre quien la crea (usuario autenticado) — se quitó el `<select>` de supervisor
+  del modal de creación. El inspector NUNCA se elige en la OT.
+- **"Generar servicio"**: desde una OT, el supervisor elige qué técnicas se van a
+  ejecutar (hoy: `MT`, `PMI`). Cada técnica elegida crea un registro independiente en
+  la nueva hoja `servicios` (BD Sheets, `sheets-db/CrearHojasBD.gs`), con columnas
+  `id_servicio, id_ot, tecnica, estado, inspector_usuario, fecha_creacion, fecha_inicio,
+  fecha_fin, duracion_min, id_informe_generado, created_at`.
+- **`id_servicio` es un valor alfanumérico libre, NO correlacionado con `id_ot`**
+  (decisión explícita del usuario: "DEBERIAS SER INDEPOENDIENTE UN VALRO ALFA NUMERICO
+  LIBRE") — hoy se genera como `SRV-XXXXXXXX` (uuid4 hex, 8 chars).
+- **El inspector se autoasigna después** (vía AppSheet, no lo elige el supervisor) —
+  el campo `inspector_usuario` de `servicios` queda vacío al crearse.
+- **Certificados ligados a técnica, no genéricos**: `certificados_usuarios` ahora
+  requiere un campo `tecnica` (MT/PMI...). Al generar un reporte, el backend
+  (`_tiene_certificado_para_tecnica()` en `main.py`) revisa si el inspector tiene
+  certificado para esa técnica específica y, si no, agrega una **advertencia no
+  bloqueante** (`warnings: string[]` en el job de generación) — el reporte se genera
+  igual, pero el supervisor ve el aviso en la webapp.
+- **Pestaña "Inspecciones" renombrada a "Reportes"** en toda la navegación (el jefe:
+  "La opestala de inspoector e realemnte deberia llamarse repoortes").
+- **Explícitamente deprioritizado por el usuario, NO construir todavía**:
+  - Equipos físicos de ensayo (solo se construyó certificados de personal, que es
+    distinto — ver D12).
+  - Tocar las hojas de producción de AppSheet (MT, PMI) para agregar `id_servicio`,
+    `fecha_inicio`, `fecha_fin`, `finalizado` — el usuario dijo explícitamente "No,
+    solo documentémoslo por ahora". Documentado en `ESTANDAR_COLUMNAS_APPSHEET.md`.
+  - Configurar el botón "Finalizado" dentro de AppSheet (se hace manualmente en la UI
+    de AppSheet, no por API) — el usuario eligió que se documente el paso a paso en
+    vez de que se intente automatizar.
+
 ---
 
 ## 2. Diagrama de componentes

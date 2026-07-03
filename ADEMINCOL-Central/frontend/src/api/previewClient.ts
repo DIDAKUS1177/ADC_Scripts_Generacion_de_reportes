@@ -132,6 +132,7 @@ export interface JobStatus {
   pct: number;
   etapa: string;
   error: string | null;
+  warnings: string[];
 }
 
 export type ReportKind = "mt" | "pmi";
@@ -193,9 +194,12 @@ export interface RealUser {
   createdAt: string | null;
 }
 
+export type Tecnica = "MT" | "PMI";
+
 export interface UserCertificate {
   idCertificado?: string;
   usuario: string;
+  tecnica: Tecnica | "";
   nombreCertificado: string;
   entidadEmisora: string;
   fechaEmision: string;
@@ -276,8 +280,10 @@ export interface RealOT {
   contrato: string | null;
   cliente: string | null;
   ubicacion: string | null;
+  // El supervisor SIEMPRE es quien crea la OT (ver decisión reunión
+  // 2026-07-03) — no existe selección manual de supervisor ni inspector
+  // a nivel de OT. El inspector se asigna por servicio (ver RealServicio).
   supervisorUsuario: string | null;
-  inspectorUsuario: string | null;
   fechaInicio: string | null;
   fechaFin: string | null;
   estado: "PENDIENTE" | "EN_CURSO" | "COMPLETADA" | "CANCELADA";
@@ -290,8 +296,7 @@ export interface NewOTPayload {
   contrato?: string;
   cliente?: string;
   ubicacion?: string;
-  supervisorUsuario?: string;
-  inspectorUsuario?: string;
+  supervisorUsuario: string; // obligatorio: se toma del usuario autenticado, no de un <select>
   fechaInicio?: string;
   fechaFin?: string;
   estado?: string;
@@ -305,11 +310,44 @@ export async function fetchRealOTs(): Promise<RealOT[]> {
   return res.json();
 }
 
-export async function createRealOT(payload: NewOTPayload): Promise<void> {
+export async function createRealOT(payload: NewOTPayload): Promise<{ idOt: string }> {
   const res = await fetch(`${PREVIEW_API_BASE}/api/preview/ots`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo crear la OT."));
+  return res.json();
+}
+
+// ---- Servicios (una técnica dentro de una OT — ver decisión reunión 2026-07-03) ----
+
+export interface RealServicio {
+  idServicio: string;
+  idOt: string;
+  tecnica: Tecnica;
+  estado: "PENDIENTE" | "EN_CURSO" | "COMPLETADA" | "CANCELADA";
+  inspectorUsuario: string | null; // se autoasigna en AppSheet, no aquí
+  fechaCreacion: string | null;
+  fechaInicio: string | null;
+  fechaFin: string | null;
+  duracionMin: number | null;
+  idInformeGenerado: string | null;
+}
+
+export async function fetchServicios(idOt?: string): Promise<RealServicio[]> {
+  const qs = idOt ? `?id_ot=${encodeURIComponent(idOt)}` : "";
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/servicios${qs}`);
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo leer los servicios."));
+  return res.json();
+}
+
+export async function crearServicio(idOt: string, tecnica: Tecnica): Promise<{ idServicio: string }> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/servicios`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idOt, tecnica }),
+  });
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo crear el servicio."));
+  return res.json();
 }

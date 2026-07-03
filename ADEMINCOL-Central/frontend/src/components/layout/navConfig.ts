@@ -22,14 +22,14 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { to: "/usuarios", label: "Usuarios", icon: Users },
     { to: "/equipos", label: "Equipos", icon: Award },
     { to: "/ots", label: "Órdenes de Trabajo", icon: ClipboardList },
-    { to: "/inspecciones", label: "Inspecciones", icon: FileSearch },
+    { to: "/inspecciones", label: "Reportes", icon: FileSearch },
     { to: "/sync", label: "Sincronización", icon: RefreshCw },
     { to: "/perfil", label: "Mi Perfil", icon: UserCircle },
   ],
   SUPERVISOR: [
     { to: "/", label: "Dashboard", icon: LayoutDashboard },
     { to: "/ots", label: "Órdenes de Trabajo", icon: ClipboardList },
-    { to: "/inspecciones", label: "Inspecciones", icon: FileSearch },
+    { to: "/inspecciones", label: "Reportes", icon: FileSearch },
     { to: "/perfil", label: "Mi Perfil", icon: UserCircle },
   ],
   INSPECTOR: [

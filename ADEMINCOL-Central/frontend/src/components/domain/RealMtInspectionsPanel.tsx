@@ -89,6 +89,9 @@ export function RealMtInspectionsPanel() {
             setJob({ pct: 100, etapa: "Descargando..." });
             await downloadJobResult(jobId, "mt", selected);
             toast.success("Reporte generado y descargado.");
+            // Advertencias no bloqueantes (ej. inspector sin certificado de
+            // esta técnica) — ver decisión reunión 2026-07-03.
+            status.warnings.forEach((w) => toast.error(`⚠️ ${w}`));
           } else {
             toast.error(status.error || "Error al generar el reporte.");
           }

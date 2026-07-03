@@ -258,6 +258,16 @@ def _job_generar(job_id: str, id_informe: str, overrides: dict):
         if firma_bd:
             fila_general["firma_link"] = firma_bd
 
+        # Advertencia (reunión 2026-07-03): avisar si el inspector que firma
+        # el informe no tiene certificado registrado para esta técnica. NO
+        # bloquea la generación — solo informa.
+        warnings = []
+        inspector_nombre = fila_general.get("nombre", "")
+        if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "MT"):
+            warnings.append(
+                f"El inspector '{inspector_nombre}' no tiene un certificado de MT registrado."
+            )
+
         def progreso(pct: int, etapa: str):
             job.update(pct=pct, etapa=etapa)
 
@@ -267,6 +277,7 @@ def _job_generar(job_id: str, id_informe: str, overrides: dict):
         job.update(
             estado="DONE", pct=100, etapa="Completado",
             archivo=contenido, nombre=f"Reporte_MT_{id_informe}.xlsx",
+            warnings=warnings,
         )
     except HTTPException as e:
         job.update(estado="ERROR", error=e.detail)
@@ -280,7 +291,7 @@ def iniciar_generacion(id_informe: str, payload: dict = Body(default={})):
     overrides = payload.get("overrides", {})
     job_id = uuid.uuid4().hex
     JOBS[job_id] = {"estado": "RUNNING", "pct": 0, "etapa": "Iniciando", "error": None,
-                    "archivo": None, "nombre": None}
+                    "archivo": None, "nombre": None, "warnings": []}
     thread = threading.Thread(target=_job_generar, args=(job_id, id_informe, overrides), daemon=True)
     thread.start()
     return {"jobId": job_id}
@@ -291,7 +302,10 @@ def estado_job(job_id: str):
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job no encontrado")
-    return {"estado": job["estado"], "pct": job["pct"], "etapa": job["etapa"], "error": job["error"]}
+    return {
+        "estado": job["estado"], "pct": job["pct"], "etapa": job["etapa"], "error": job["error"],
+        "warnings": job.get("warnings", []),
+    }
 
 
 @app.get("/api/preview/jobs/{job_id}/descargar")
@@ -435,6 +449,13 @@ def _job_generar_pmi(job_id: str, id_general: str, overrides: dict):
         if firma_bd:
             fila_general["link_firma"] = firma_bd
 
+        warnings = []
+        inspector_nombre = fila_general.get("nombre", "")
+        if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "PMI"):
+            warnings.append(
+                f"El inspector '{inspector_nombre}' no tiene un certificado de PMI registrado."
+            )
+
         def progreso(pct: int, etapa: str):
             job.update(pct=pct, etapa=etapa)
 
@@ -442,6 +463,7 @@ def _job_generar_pmi(job_id: str, id_general: str, overrides: dict):
         job.update(
             estado="DONE", pct=100, etapa="Completado",
             archivo=contenido, nombre=f"Reporte_PMI_{id_general}.xlsx",
+            warnings=warnings,
         )
     except HTTPException as e:
         job.update(estado="ERROR", error=e.detail)
@@ -455,7 +477,7 @@ def iniciar_generacion_pmi(id_general: str, payload: dict = Body(default={})):
     overrides = payload.get("overrides", {})
     job_id = uuid.uuid4().hex
     JOBS[job_id] = {"estado": "RUNNING", "pct": 0, "etapa": "Iniciando", "error": None,
-                    "archivo": None, "nombre": None}
+                    "archivo": None, "nombre": None, "warnings": []}
     thread = threading.Thread(target=_job_generar_pmi, args=(job_id, id_general, overrides), daemon=True)
     thread.start()
     return {"jobId": job_id}
@@ -578,6 +600,7 @@ def list_usuario_certificados(usuario: str):
             out.append({
                 "idCertificado": r.get("id_certificado"),
                 "usuario": r.get("usuario"),
+                "tecnica": r.get("tecnica") or None,
                 "nombreCertificado": r.get("nombre_certificado"),
                 "entidadEmisora": r.get("entidad_emisora"),
                 "fechaEmision": r.get("fecha_emision"),
@@ -590,6 +613,12 @@ def list_usuario_certificados(usuario: str):
 @app.patch("/api/preview/usuarios/{usuario}/certificados")
 def update_usuario_certificados(usuario: str, payload: dict = Body(...)):
     certificados = payload.get("certificados", [])
+    for c in certificados:
+        if not str(c.get("tecnica", "")).strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Cada certificado debe indicar a qué técnica corresponde (MT, PMI...).",
+            )
     try:
         delete_rows_by_key(BD_SPREADSHEET_ID, "certificados_usuarios", "usuario", usuario)
         for c in certificados:
@@ -599,6 +628,7 @@ def update_usuario_certificados(usuario: str, payload: dict = Body(...)):
                 {
                     "id_certificado": c.get("idCertificado") or uuid.uuid4().hex[:8].upper(),
                     "usuario": usuario,
+                    "tecnica": c.get("tecnica", "").strip(),
                     "nombre_certificado": c.get("nombreCertificado", "").strip(),
                     "entidad_emisora": c.get("entidadEmisora", "").strip(),
                     "fecha_emision": c.get("fechaEmision", "").strip(),
@@ -607,11 +637,53 @@ def update_usuario_certificados(usuario: str, payload: dict = Body(...)):
                     "created_at": c.get("createdAt") or datetime.now().isoformat(timespec="seconds")
                 }
             )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Error actualizando certificados")
         raise HTTPException(status_code=502, detail=f"Error actualizando en BD: {e}")
-        
+
     return {"ok": True}
+
+
+def _tiene_certificado_para_tecnica(usuario_nombre: str, tecnica: str) -> bool:
+    """Usado al generar reportes para la advertencia de 'inspector sin
+    certificado' (ver decisión de la reunión 2026-07-03). Busca el usuario
+    por nombre (match tolerante, igual que _buscar_firma_usuario) y revisa
+    si tiene al menos un certificado registrado para esa técnica."""
+    try:
+        usuarios = read_sheet_as_dicts(BD_SPREADSHEET_ID, "usuarios")
+        certificados = read_sheet_as_dicts(BD_SPREADSHEET_ID, "certificados_usuarios")
+    except Exception:
+        logger.warning("No se pudo verificar certificado para advertencia")
+        return True  # no bloquear el reporte por un fallo de lectura
+
+    palabras_objetivo = set(_normalizar_nombre(usuario_nombre).split())
+    if not palabras_objetivo:
+        return True
+
+    usuario_login = None
+    for u in usuarios:
+        palabras_bd = set(_normalizar_nombre(u.get("nombre", "")).split())
+        if not palabras_bd:
+            continue
+        corta, larga = (
+            (palabras_bd, palabras_objetivo)
+            if len(palabras_bd) <= len(palabras_objetivo)
+            else (palabras_objetivo, palabras_bd)
+        )
+        if len(corta) >= 2 and corta.issubset(larga):
+            usuario_login = u.get("usuario")
+            break
+
+    if not usuario_login:
+        return False  # ni siquiera existe como usuario registrado
+
+    return any(
+        str(c.get("usuario", "")).strip() == usuario_login
+        and str(c.get("tecnica", "")).strip().upper() == tecnica.upper()
+        for c in certificados
+    )
 
 
 @app.get("/api/preview/ots")
@@ -634,7 +706,6 @@ def list_ots():
                 "cliente": r.get("cliente") or None,
                 "ubicacion": r.get("ubicacion") or None,
                 "supervisorUsuario": r.get("supervisor_usuario") or None,
-                "inspectorUsuario": r.get("inspector_usuario") or None,
                 "fechaInicio": r.get("fecha_inicio") or None,
                 "fechaFin": r.get("fecha_fin") or None,
                 "estado": r.get("estado") or "PENDIENTE",
@@ -647,8 +718,17 @@ def list_ots():
 
 @app.post("/api/preview/ots")
 def crear_ot(payload: dict = Body(...)):
+    """El supervisor NUNCA se selecciona manualmente: 'supervisorUsuario' es
+    SIEMPRE el usuario que hace la petición (decisión de la reunión
+    2026-07-03 — 'el supervisor es el que hace la solicitud'). El backend de
+    preview no tiene sesión real, así que el frontend lo envía tomándolo de
+    su AuthContext; cuando exista auth de verdad (Fase 2) esto se lee del
+    token en vez del payload. No existe 'inspectorUsuario' a nivel de OT: se
+    asigna por servicio (ver /api/preview/servicios)."""
     if not str(payload.get("numero", "")).strip():
         raise HTTPException(status_code=422, detail="El número de OT es requerido")
+    if not str(payload.get("supervisorUsuario", "")).strip():
+        raise HTTPException(status_code=422, detail="Falta el usuario del supervisor solicitante")
     estado = payload.get("estado", "PENDIENTE")
     if estado not in ("PENDIENTE", "EN_CURSO", "COMPLETADA", "CANCELADA"):
         raise HTTPException(status_code=422, detail="Estado inválido")
@@ -659,17 +739,17 @@ def crear_ot(payload: dict = Body(...)):
             raise HTTPException(status_code=409, detail=f"La OT '{payload['numero']}' ya existe")
 
         n = len([r for r in existentes if r.get("id_ot", "").strip()]) + 1
+        id_ot = f"OT-{n:04d}"
         append_row(
             BD_SPREADSHEET_ID,
             "work_orders",
             {
-                "id_ot": f"OT-{n:04d}",
+                "id_ot": id_ot,
                 "numero": payload["numero"].strip(),
                 "contrato": payload.get("contrato", "").strip(),
                 "cliente": payload.get("cliente", "").strip(),
                 "ubicacion": payload.get("ubicacion", "").strip(),
-                "supervisor_usuario": payload.get("supervisorUsuario", "").strip(),
-                "inspector_usuario": payload.get("inspectorUsuario", "").strip(),
+                "supervisor_usuario": payload["supervisorUsuario"].strip(),
                 "fecha_inicio": payload.get("fechaInicio", "").strip(),
                 "fecha_fin": payload.get("fechaFin", "").strip(),
                 "estado": estado,
@@ -683,4 +763,81 @@ def crear_ot(payload: dict = Body(...)):
     except Exception as e:
         logger.exception("Error creando OT")
         raise HTTPException(status_code=502, detail=f"No se pudo escribir en la BD: {e}")
-    return {"ok": True}
+    return {"ok": True, "idOt": id_ot}
+
+
+# =====================================================================
+# Servicios — una técnica (MT, PMI...) dentro de una OT (decisión reunión
+# 2026-07-03). Cada servicio tiene su propio id_servicio alfanumérico libre,
+# su propio estado, y el inspector se autoasigna (no lo elige el supervisor).
+# =====================================================================
+
+@app.get("/api/preview/servicios")
+def list_servicios(id_ot: str | None = None):
+    try:
+        rows = read_sheet_as_dicts(BD_SPREADSHEET_ID, "servicios")
+    except Exception as e:
+        logger.exception("Error leyendo hoja servicios")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer la BD de servicios: {e}")
+
+    out = []
+    for r in rows:
+        if not r.get("id_servicio", "").strip():
+            continue
+        if id_ot and r.get("id_ot", "").strip() != id_ot:
+            continue
+        out.append(
+            {
+                "idServicio": r.get("id_servicio"),
+                "idOt": r.get("id_ot"),
+                "tecnica": r.get("tecnica"),
+                "estado": r.get("estado") or "PENDIENTE",
+                "inspectorUsuario": r.get("inspector_usuario") or None,
+                "fechaCreacion": r.get("fecha_creacion") or None,
+                "fechaInicio": r.get("fecha_inicio") or None,
+                "fechaFin": r.get("fecha_fin") or None,
+                "duracionMin": r.get("duracion_min") or None,
+                "idInformeGenerado": r.get("id_informe_generado") or None,
+            }
+        )
+    return out
+
+
+@app.post("/api/preview/servicios")
+def crear_servicio(payload: dict = Body(...)):
+    id_ot = str(payload.get("idOt", "")).strip()
+    tecnica = str(payload.get("tecnica", "")).strip().upper()
+    if not id_ot:
+        raise HTTPException(status_code=422, detail="Falta idOt")
+    if tecnica not in ("MT", "PMI"):
+        raise HTTPException(status_code=422, detail="Técnica inválida (debe ser MT o PMI)")
+
+    try:
+        ots = read_sheet_as_dicts(BD_SPREADSHEET_ID, "work_orders")
+        if not any(r.get("id_ot", "").strip() == id_ot for r in ots):
+            raise HTTPException(status_code=404, detail=f"No existe la OT '{id_ot}'")
+
+        id_servicio = f"SRV-{uuid.uuid4().hex[:8].upper()}"
+        append_row(
+            BD_SPREADSHEET_ID,
+            "servicios",
+            {
+                "id_servicio": id_servicio,
+                "id_ot": id_ot,
+                "tecnica": tecnica,
+                "estado": "PENDIENTE",
+                "inspector_usuario": "",  # se autoasigna en AppSheet, no aquí
+                "fecha_creacion": datetime.now().isoformat(timespec="seconds"),
+                "fecha_inicio": "",
+                "fecha_fin": "",
+                "duracion_min": "",
+                "id_informe_generado": "",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error creando servicio")
+        raise HTTPException(status_code=502, detail=f"No se pudo escribir en la BD: {e}")
+    return {"ok": True, "idServicio": id_servicio}

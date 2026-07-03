@@ -137,6 +137,7 @@ function CertificatesModal({ user, onClose }: { user: RealUser; onClose: () => v
       ...certs,
       {
         usuario: user.usuario,
+        tecnica: "",
         nombreCertificado: "",
         entidadEmisora: "",
         fechaEmision: "",
@@ -165,8 +166,12 @@ function CertificatesModal({ user, onClose }: { user: RealUser; onClose: () => v
         toast.error("El nombre del certificado es obligatorio.");
         return;
       }
+      if (!c.tecnica) {
+        toast.error("Cada certificado debe indicar a qué técnica corresponde (MT, PMI...).");
+        return;
+      }
     }
-    
+
     setSaving(true);
     try {
       await updateUserCertificates(user.usuario, certs);
@@ -212,6 +217,18 @@ function CertificatesModal({ user, onClose }: { user: RealUser; onClose: () => v
                     <Trash2 size={16} />
                   </button>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 mr-6">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-ink-700">Técnica *</label>
+                      <select
+                        value={c.tecnica}
+                        onChange={(e) => updateCert(i, "tecnica", e.target.value)}
+                        className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
+                      >
+                        <option value="">— Selecciona —</option>
+                        <option value="MT">MT — Partículas Magnéticas</option>
+                        <option value="PMI">PMI — Caracterización de Materiales</option>
+                      </select>
+                    </div>
                     <div className="md:col-span-2">
                       <label className="mb-1 block text-xs font-medium text-ink-700">Nombre del Certificado *</label>
                       <input
