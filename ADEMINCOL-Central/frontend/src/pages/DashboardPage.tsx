@@ -1,35 +1,34 @@
 import { useEffect, useState } from "react";
-import { ClipboardList, FileCheck2, Clock3, RefreshCw } from "lucide-react";
+import { ClipboardList, FileCheck2, Clock3, Users, AlertTriangle, Wrench } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import type { DashboardStats } from "../types";
-import { fetchDashboard } from "../mock/client";
-import { Spinner } from "../components/ui/States";
+import { fetchRealDashboard, type RealDashboardData } from "../api/previewClient";
+import { Spinner, ErrorState } from "../components/ui/States";
+import { Badge } from "../components/ui/Badge";
 import { ROLE_LABEL } from "../components/layout/navConfig";
 
-function timeAgo(iso: string): string {
-  const diffMin = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
-  if (diffMin < 1) return "hace instantes";
-  if (diffMin < 60) return `hace ${diffMin} min`;
-  return `hace ${Math.round(diffMin / 60)} h`;
-}
-
+// Dashboard con datos REALES (BD Sheets + Sheets de MT/PMI/570), diferenciado
+// por rol — ver decisión reunión 2026-07-03 ("mejora ese dashboard, ajustado
+// para que el administrador mire los activos, los supervisores inspectores").
+// Reemplaza el mock de mock/client.ts.
 export function DashboardPage() {
   const { user } = useAuth();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [data, setData] = useState<RealDashboardData | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  function load() {
     if (!user) return;
-    fetchDashboard(user.rol).then(setStats);
-  }, [user]);
+    setError(null);
+    setData(null);
+    fetchRealDashboard(user.usuario, user.rol)
+      .then(setData)
+      .catch((e) => setError(e instanceof Error ? e.message : "Error desconocido"));
+  }
+
+  useEffect(load, [user]);
 
   if (!user) return null;
-  if (!stats) return <Spinner label="Cargando indicadores..." />;
-
-  const otsTotal = Object.values(stats.otsPorEstado).reduce((a, b) => a + b, 0);
-  const pendientesTotal = Object.values(stats.inspeccionesPendientesPorTipo).reduce(
-    (a, b) => a + b,
-    0
-  );
+  if (error) return <ErrorState message={error} onRetry={load} />;
+  if (!data) return <Spinner label="Cargando indicadores reales..." />;
 
   return (
     <div>
@@ -38,57 +37,185 @@ export function DashboardPage() {
       </h1>
       <p className="mb-6 text-sm text-ink-500">{ROLE_LABEL[user.rol]} · ADEMINCOL Central</p>
 
+      {user.rol === "ADMINISTRADOR" && <AdminDashboard data={data} />}
+      {user.rol === "SUPERVISOR" && <SupervisorDashboard data={data} />}
+      {user.rol === "INSPECTOR" && <InspectorDashboard data={data} />}
+    </div>
+  );
+}
+
+// ---- ADMINISTRADOR: visión global del negocio ("los activos") ----
+function AdminDashboard({ data }: { data: RealDashboardData }) {
+  const totalReportes = Object.values(data.reportesPorTipo).reduce((a, r) => a + r.total, 0);
+  const totalGenerados = Object.values(data.reportesPorTipo).reduce((a, r) => a + r.generados, 0);
+
+  return (
+    <div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          icon={ClipboardList}
-          label="Órdenes de trabajo"
-          value={otsTotal}
-          tone="blue"
-        />
-        <StatCard
-          icon={FileCheck2}
-          label="Reportes este mes"
-          value={stats.reportesGeneradosMes}
-          tone="green"
-        />
-        <StatCard
-          icon={Clock3}
-          label="Inspecciones pendientes"
-          value={pendientesTotal}
-          tone="yellow"
-        />
-        <StatCard
-          icon={RefreshCw}
-          label="Última sincronización"
-          value={timeAgo(stats.ultimaSincronizacion)}
-          tone="gray"
-          small
-        />
+        <StatCard icon={Users} label="Usuarios activos" value={data.usuariosActivos} tone="blue" />
+        <StatCard icon={ClipboardList} label="Órdenes de trabajo" value={data.otsTotal} tone="blue" />
+        <StatCard icon={Wrench} label="Servicios sin inspector asignado" value={data.serviciosPendientes} tone="yellow" />
+        <StatCard icon={FileCheck2} label="Reportes generados" value={`${totalGenerados} / ${totalReportes}`} tone="green" />
       </div>
 
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="rounded-xl border border-ink-200 bg-white p-5">
-          <h2 className="mb-4 text-sm font-bold text-ink-800">OTs por estado</h2>
-          <div className="space-y-3">
-            {Object.entries(stats.otsPorEstado).map(([estado, count]) => (
-              <BarRow key={estado} label={estado} value={count} max={otsTotal || 1} />
-            ))}
-          </div>
-        </div>
+        <Panel title="OTs por estado">
+          {Object.entries(data.otsPorEstado).length === 0 ? (
+            <EmptyRow />
+          ) : (
+            Object.entries(data.otsPorEstado).map(([estado, count]) => (
+              <BarRow key={estado} label={estado} value={count} max={data.otsTotal || 1} />
+            ))
+          )}
+        </Panel>
 
-        <div className="rounded-xl border border-ink-200 bg-white p-5">
-          <h2 className="mb-4 text-sm font-bold text-ink-800">
-            Inspecciones pendientes por tipo
-          </h2>
-          <div className="space-y-3">
-            {Object.entries(stats.inspeccionesPendientesPorTipo).map(([tipo, count]) => (
-              <BarRow key={tipo} label={tipo} value={count} max={pendientesTotal || 1} />
-            ))}
-          </div>
-        </div>
+        <Panel title="Reportes por técnica (generados / total)">
+          {Object.entries(data.reportesPorTipo).map(([tipo, r]) => (
+            <BarRow key={tipo} label={tipo} value={r.generados} max={r.total || 1} suffix={`${r.generados}/${r.total}`} />
+          ))}
+        </Panel>
+
+        <Panel title="Servicios por técnica">
+          {Object.entries(data.serviciosPorTecnica).length === 0 ? (
+            <EmptyRow />
+          ) : (
+            Object.entries(data.serviciosPorTecnica).map(([tecnica, count]) => (
+              <BarRow key={tecnica} label={tecnica} value={count} max={data.serviciosTotal || 1} />
+            ))
+          )}
+        </Panel>
+
+        <Panel title={`Certificados por vencer (60 días) — ${data.certificadosPorVencer.length}`}>
+          {data.certificadosPorVencer.length === 0 ? (
+            <p className="text-sm text-ink-400">Ningún certificado vence pronto.</p>
+          ) : (
+            <div className="space-y-2">
+              {data.certificadosPorVencer.map((c, i) => (
+                <div key={i} className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-xs">
+                  <div>
+                    <p className="font-medium text-amber-800">{c.usuario} · {c.tecnica}</p>
+                    <p className="text-amber-600">{c.nombreCertificado}</p>
+                  </div>
+                  <Badge tone="yellow">{c.fechaVencimiento}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
       </div>
     </div>
   );
+}
+
+// ---- SUPERVISOR: sus propias OTs y servicios ----
+function SupervisorDashboard({ data }: { data: RealDashboardData }) {
+  const misOts = data.misOts ?? [];
+  const misServicios = data.misServicios ?? [];
+  const serviciosSinInspector = misServicios.filter((s) => s.estado === "PENDIENTE").length;
+
+  return (
+    <div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard icon={ClipboardList} label="Mis órdenes de trabajo" value={misOts.length} tone="blue" />
+        <StatCard icon={Wrench} label="Mis servicios generados" value={misServicios.length} tone="blue" />
+        <StatCard icon={Clock3} label="Servicios sin inspector asignado" value={serviciosSinInspector} tone="yellow" />
+      </div>
+
+      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Panel title="Mis OTs">
+          {misOts.length === 0 ? (
+            <EmptyRow />
+          ) : (
+            <div className="space-y-1.5">
+              {misOts.map((ot) => (
+                <div key={ot.idOt} className="flex items-center justify-between rounded-lg bg-ink-50 px-3 py-2 text-xs">
+                  <span className="font-medium">{ot.numero} — {ot.cliente || "sin cliente"}</span>
+                  <Badge tone={ot.estado === "COMPLETADA" ? "green" : "gray"}>{ot.estado}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Mis servicios">
+          {misServicios.length === 0 ? (
+            <EmptyRow />
+          ) : (
+            <div className="space-y-1.5">
+              {misServicios.map((s) => (
+                <div key={s.idServicio} className="flex items-center justify-between rounded-lg bg-ink-50 px-3 py-2 text-xs">
+                  <span className="font-medium">{s.tecnica} · {s.idOt}</span>
+                  <Badge tone={s.estado === "COMPLETADA" ? "green" : "gray"}>{s.estado}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+// ---- INSPECTOR: sus servicios asignados y sus certificados ----
+function InspectorDashboard({ data }: { data: RealDashboardData }) {
+  const misServicios = data.misServicios ?? [];
+  const misCertsPorVencer = data.misCertificadosPorVencer ?? [];
+  const pendientes = misServicios.filter((s) => s.estado !== "COMPLETADA").length;
+
+  return (
+    <div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard icon={Wrench} label="Servicios asignados" value={misServicios.length} tone="blue" />
+        <StatCard icon={Clock3} label="Pendientes" value={pendientes} tone="yellow" />
+        <StatCard icon={AlertTriangle} label="Mis certificados por vencer" value={misCertsPorVencer.length} tone={misCertsPorVencer.length > 0 ? "yellow" : "gray"} />
+      </div>
+
+      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Panel title="Mis servicios asignados">
+          {misServicios.length === 0 ? (
+            <p className="text-sm text-ink-400">Aún no tienes servicios autoasignados en AppSheet.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {misServicios.map((s) => (
+                <div key={s.idServicio} className="flex items-center justify-between rounded-lg bg-ink-50 px-3 py-2 text-xs">
+                  <span className="font-medium">{s.tecnica} · {s.idOt}</span>
+                  <Badge tone={s.estado === "COMPLETADA" ? "green" : "gray"}>{s.estado}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Mis certificados por vencer">
+          {misCertsPorVencer.length === 0 ? (
+            <p className="text-sm text-ink-400">Ningún certificado tuyo vence en los próximos 60 días.</p>
+          ) : (
+            <div className="space-y-2">
+              {misCertsPorVencer.map((c, i) => (
+                <div key={i} className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-xs">
+                  <span className="font-medium text-amber-800">{c.tecnica} — {c.nombreCertificado}</span>
+                  <Badge tone="yellow">{c.fechaVencimiento}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-ink-200 bg-white p-5">
+      <h2 className="mb-4 text-sm font-bold text-ink-800">{title}</h2>
+      <div className="space-y-3">{children}</div>
+    </div>
+  );
+}
+
+function EmptyRow() {
+  return <p className="text-sm text-ink-400">Sin datos todavía.</p>;
 }
 
 function StatCard({
@@ -96,13 +223,11 @@ function StatCard({
   label,
   value,
   tone,
-  small,
 }: {
   icon: typeof ClipboardList;
   label: string;
   value: number | string;
   tone: "blue" | "green" | "yellow" | "gray";
-  small?: boolean;
 }) {
   const toneClasses = {
     blue: "bg-sky-50 text-sky-600",
@@ -116,19 +241,29 @@ function StatCard({
       <div className={`mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg ${toneClasses}`}>
         <Icon size={18} />
       </div>
-      <p className={`font-bold text-ink-900 ${small ? "text-base" : "text-2xl"}`}>{value}</p>
+      <p className="text-2xl font-bold text-ink-900">{value}</p>
       <p className="text-xs text-ink-500">{label}</p>
     </div>
   );
 }
 
-function BarRow({ label, value, max }: { label: string; value: number; max: number }) {
+function BarRow({
+  label,
+  value,
+  max,
+  suffix,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  suffix?: string;
+}) {
   const pct = Math.round((value / max) * 100);
   return (
     <div>
       <div className="mb-1 flex justify-between text-xs text-ink-600">
-        <span className="font-medium">{label.replace("_", " ")}</span>
-        <span>{value}</span>
+        <span className="font-medium">{label.replace(/_/g, " ")}</span>
+        <span>{suffix ?? value}</span>
       </div>
       <div className="h-2 rounded-full bg-ink-100">
         <div className="h-2 rounded-full bg-brand-600" style={{ width: `${pct}%` }} />

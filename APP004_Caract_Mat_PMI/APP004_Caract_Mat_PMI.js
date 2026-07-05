@@ -544,7 +544,7 @@ function procesarReporteIndividual(idBuscado) {
     const hojaDestino = reporteSs.getSheetByName(NOMBRE_HOJA_FORMATO);
 
     procesarDatosGenerales(hojaDestino, dataGeneral, MAPEO_GENERAL);
-    procesarImagenes(hojaDestino, dataGeneral, MAPEO_IMAGENES);
+    procesarImagenes(hojaDestino, dataGeneral, MAPEO_IMAGENES, rowsDurezas);
     procesarQuimica(hojaDestino, rowsQuimica);
     procesarDurezas(hojaDestino, rowsDurezas);
 
@@ -562,17 +562,31 @@ function procesarDatosGenerales(hoja, dataObj, mapeo) {
     }
 }
 
-function procesarImagenes(hoja, dataObj, mapeoImagenes) {
+function procesarImagenes(hoja, dataObj, mapeoImagenes, rowsDurezas) {
     const encabezados = dataObj.encabezados;
     const fila = dataObj.fila;
     for (const columnaBD in mapeoImagenes) {
         const celdaDestino = mapeoImagenes[columnaBD];
         const indice = encabezados.indexOf(columnaBD);
-        if (indice !== -1) {
-            const rango = hoja.getRange(celdaDestino);
+        if (indice === -1) continue;
+
+        const valor = fila[indice];
+        const rango = hoja.getRange(celdaDestino);
+
+        // link_imagen_10 (R202) es el gráfico Tensión vs Punto que antes se
+        // generaba corriendo un script en R y subiendo el PNG a mano
+        // (decisión 2026-07-04). Si no hay nada subido ahí, se genera aquí
+        // mismo con el servicio Charts a partir de las durezas del informe.
+        // Si SÍ hay un link manual, se respeta (permite reemplazar el
+        // gráfico automático en un caso puntual).
+        if (columnaBD === 'link_imagen_10' && (!valor || String(valor).trim() === '')) {
             rango.clearContent();
-            insertarImagenFlotante(fila[indice], rango);
+            generarGraficoDurezas(hoja, rowsDurezas, celdaDestino);
+            continue;
         }
+
+        rango.clearContent();
+        insertarImagenFlotante(valor, rango);
     }
 }
 
@@ -679,13 +693,26 @@ function insertarImagenFlotante(url, rango) {
     }
     if (!finalUrl.startsWith('http')) { rango.setValue('No URL'); return; }
 
-    const hoja = rango.getSheet();
     try {
         const resp = UrlFetchApp.fetch(finalUrl, { muteHttpExceptions: true, followRedirects: true });
         if (resp.getResponseCode() !== 200) { rango.setValue('Error Img'); return; }
-        const blob = resp.getBlob();
+        insertarBlobFlotante(resp.getBlob(), rango);
+    } catch (e) {
+        Logger.log('Error insertando imagen: ' + e.message);
+        rango.setValue('Error Img');
+    }
+}
 
-        // Soporta celdas combinadas
+/**
+ * Igual que insertarImagenFlotante pero a partir de un Blob que YA se tiene
+ * en memoria (no una URL que descargar) — usado tanto para fotos ya
+ * descargadas como para el gráfico de durezas generado con Charts service
+ * (ver generarGraficoDurezas). Centra y escala manteniendo proporción,
+ * soporta celdas combinadas.
+ */
+function insertarBlobFlotante(blob, rango) {
+    const hoja = rango.getSheet();
+    try {
         let destino = rango;
         if (rango.isPartOfMerge()) {
             const merges = rango.getMergedRanges();
@@ -694,14 +721,12 @@ function insertarImagenFlotante(url, rango) {
         const fila = destino.getRow();
         const col = destino.getColumn();
 
-        // Tamaño del área de destino en píxeles
         let anchoArea = 0, altoArea = 0;
         for (let c = 0; c < destino.getNumColumns(); c++) anchoArea += hoja.getColumnWidth(col + c);
         for (let r = 0; r < destino.getNumRows(); r++) altoArea += hoja.getRowHeight(fila + r);
 
         const img = hoja.insertImage(blob, col, fila);
 
-        // Escalar manteniendo proporción (con margen pequeño)
         const margen = 4;
         const escala = Math.min(
             Math.max(anchoArea - margen, 20) / img.getWidth(),
@@ -715,10 +740,163 @@ function insertarImagenFlotante(url, rango) {
         const offsetY = Math.max(0, Math.round((altoArea  - altoFinal)  / 2));
         img.setAnchorCellXOffset(offsetX);
         img.setAnchorCellYOffset(offsetY);
-
     } catch (e) {
-        Logger.log('Error insertando imagen: ' + e.message);
+        Logger.log('Error insertando blob: ' + e.message);
         rango.setValue('Error Img');
+    }
+}
+
+// =================================================================
+// --- GRÁFICO TENSIÓN VS PUNTO (durezas) — celda R202 ---
+// Traducción del script en R (ggplot2) que el usuario corría manualmente
+// antes de subir el PNG a mano (decisión 2026-07-04). Misma tabla de
+// referencia y misma fórmula de límites (IQR) que chart_durezas.py en el
+// backend Python — ver ese archivo para el detalle de las decisiones.
+// LIMITACIÓN: Charts.newComboChart() no soporta etiquetas de texto en
+// coordenadas de datos como ggplot (geom_label) — se usa una leyenda a la
+// derecha en su lugar. El backend Python sí tiene las etiquetas inline.
+// =================================================================
+const ELEMENTO_DEFAULT_GRAFICO = 'TUBERIA';
+
+// (ELEMENTO, MATERIAL, FLUENCIA, TENSION, COLOR) — mismo catálogo fijo que
+// TABLA_ELEMENTOS en chart_durezas.py, extraído el 2026-07-04 de la hoja
+// ELEMENTO de referencia (catálogo API/ASME, no cambia por proyecto).
+const TABLA_ELEMENTOS_GRAFICO = [
+    ['CODO', 'A234 Gr WPB', 35, 60, '#A7B4C9'],
+    ['CODO', 'A860 WPHY 46', 46, 63, '#89AEE0'],
+    ['CODO', 'A860 WPHY 52', 52, 66, '#89AEE0'],
+    ['CODO', 'A860 WPHY 60', 60, 75, '#89AEE0'],
+    ['CODO', 'A860 WPHY 65', 65, 77, '#89AEE0'],
+    ['CODO', 'A860 WPHY 70', 70, 80, '#89AEE0'],
+    ['RED', 'A694 F42', 42, 60, '#395882'],
+    ['RED', 'A694 F48', 48, 62, '#395882'],
+    ['RED', 'A694 F52', 52, 66, '#395882'],
+    ['RED', 'A694 F56', 56, 68, '#395882'],
+    ['RED', 'A694 F60', 60, 75, '#395882'],
+    ['RED', 'A694 F65', 65, 77, '#395882'],
+    ['RED', 'A694 F70', 70, 82, '#395882'],
+    ['TUBERIA', 'X46', 46.4, 63.1, '#808080'],
+    ['TUBERIA', 'X52', 52.2, 66.7, '#808080'],
+    ['TUBERIA', 'X56', 56.6, 71.1, '#808080'],
+    ['TUBERIA', 'X60', 60.2, 75.4, '#A7B4C9'],
+    ['TUBERIA', 'X65', 65.3, 77.6, '#808080'],
+    ['TUBERIA', 'X70', 70.3, 82.7, '#808080'],
+    ['TUBERIA', 'A53 Gr B/A106 Gr B / X42', 36, 60, '#395882'],
+    ['RED', 'ASTM A105', 36, 70, '#9199AB'],
+    ['RED', 'A234 Gr WPB', 35, 60, '#A7B4C9'],
+    ['WELDOLET', 'ASTM A105', 36, 70, '#9199AB'],
+    ['WELDOLET', 'A694 F42', 42, 60, '#395882'],
+    ['WELDOLET', 'A694 F52', 52, 66, '#395882'],
+    ['WELDOLET', 'A694 F56', 56, 68, '#395882'],
+    ['WELDOLET', 'A694 F60', 60, 75, '#395882'],
+    ['WELDOLET', 'A694 F65', 65, 77, '#395882'],
+    ['WELDOLET', 'A694 F70', 70, 82, '#395882'],
+    ['VAL', 'A216 WCB Inf./ A105', 70, 70, '#395882'],
+    ['VAL', 'A216 WCB Sup.', 95, 95, '#395882'],
+    ['TAPA', 'A694 F42 / A694 F46', 42, 60, '#395882'],
+    ['TAPA', 'A694 F52', 52, 66, '#395882'],
+    ['TAPA', 'A694 F56', 56, 68, '#395882'],
+    ['TAPA', 'A694 F60', 60, 75, '#395882'],
+    ['TAPA', 'A694 F65', 65, 77, '#395882'],
+    ['TAPA', 'A694 F70', 70, 82, '#395882'],
+    ['TAPA', 'A105', 65, 70, '#89AEE0'],
+    ['PULMON', 'A283 Gr. C', 30, 55, '#89AEE0'],
+    ['PULMON', 'A283 Gr. C', 30, 75, '#89AEE0'],
+    ['PULMON', 'A53 Gr B / 516 Gr. 60', 36, 60, '#395882'],
+    ['PULMON', 'A516 Gr. 60', 52, 80, '#395882'],
+];
+
+/** quantile(..., type=7) de R (interpolación lineal) — `valoresOrdenados`
+ * debe venir ya ordenado ascendente. Mismo método que numpy.percentile
+ * (default) usado en chart_durezas.py, para que Q1/Q3/límites coincidan
+ * entre el reporte generado por Sheets y el generado por la webapp. */
+function cuantilTipo7(valoresOrdenados, p) {
+    const n = valoresOrdenados.length;
+    if (n === 1) return valoresOrdenados[0];
+    const h = (n - 1) * p;
+    const lo = Math.floor(h);
+    const hi = Math.ceil(h);
+    if (lo === hi) return valoresOrdenados[lo];
+    return valoresOrdenados[lo] + (h - lo) * (valoresOrdenados[hi] - valoresOrdenados[lo]);
+}
+
+function generarGraficoDurezas(hojaDestino, rowsDurezas, celdaDestino, elemento) {
+    elemento = elemento || ELEMENTO_DEFAULT_GRAFICO;
+    const rango = hojaDestino.getRange(celdaDestino);
+    if (!rowsDurezas || !rowsDurezas.filas || !rowsDurezas.filas.length) return;
+
+    const encabezados = rowsDurezas.encabezados;
+    let idxKsi = encabezados.indexOf('"ksi", H - O-  W - AD');
+    if (idxKsi === -1) idxKsi = encabezados.findIndex(c => String(c).toLowerCase().includes('ksi'));
+    if (idxKsi === -1) return;
+
+    const valores = rowsDurezas.filas
+        .map(f => parseFloat(String(f[idxKsi]).replace(',', '.')))
+        .filter(v => !isNaN(v));
+    if (valores.length < 2) return;
+
+    const ordenados = [...valores].sort((a, b) => a - b);
+    const q1 = cuantilTipo7(ordenados, 0.25);
+    const q3 = cuantilTipo7(ordenados, 0.75);
+    const iqr = q3 - q1;
+    const limInf = q1 - 1.5 * iqr;
+    const limSup = q3 + 1.5 * iqr;
+
+    // distinct(MATERIAL, TENSION, COLOR) del elemento pedido
+    const vistos = new Set();
+    const materialesUnicos = [];
+    TABLA_ELEMENTOS_GRAFICO.forEach(([elem, material, , tension, color]) => {
+        if (elem !== elemento) return;
+        const key = material + '|' + tension + '|' + color;
+        if (vistos.has(key)) return;
+        vistos.add(key);
+        materialesUnicos.push({ material: material, tension: tension, color: color });
+    });
+
+    try {
+        const dataTable = Charts.newDataTable();
+        dataTable.addColumn(Charts.ColumnType.NUMBER, 'Punto');
+        dataTable.addColumn(Charts.ColumnType.NUMBER, 'Tensión (ksi)');
+        dataTable.addColumn(Charts.ColumnType.NUMBER, 'Lim. Inf.');
+        dataTable.addColumn(Charts.ColumnType.NUMBER, 'Lim. Sup.');
+        materialesUnicos.forEach(m => dataTable.addColumn(Charts.ColumnType.NUMBER, m.material));
+
+        valores.forEach((v, i) => {
+            const fila = [i + 1, v, limInf, limSup];
+            materialesUnicos.forEach(m => fila.push(m.tension));
+            dataTable.addRow(fila);
+        });
+
+        // Series 0 = puntos reales (scatter). El resto (límites + líneas de
+        // material) se fuerzan a tipo 'line' con valor constante, que es la
+        // forma estándar de simular hlines en un combo chart de Apps Script.
+        const seriesOptions = {};
+        for (let i = 1; i <= 2 + materialesUnicos.length; i++) {
+            seriesOptions[i] = {
+                type: 'line',
+                lineWidth: i <= 2 ? 2 : 1.2,
+                lineDashStyle: i <= 2 ? null : [4, 4],
+                pointSize: 0,
+            };
+        }
+        const colores = ['#f8996d', '#ff0000', '#ff0000'].concat(materialesUnicos.map(m => m.color));
+
+        const chart = Charts.newComboChart()
+            .setDataTable(dataTable)
+            .setXAxisTitle('Punto')
+            .setYAxisTitle('Resistencia a la tensión (Ksi)')
+            .setDimensions(1100, 520)
+            .setOption('seriesType', 'scatter')
+            .setOption('backgroundColor', '#ffffff')
+            .setOption('legend', { position: 'right', textStyle: { fontSize: 9 } })
+            .setOption('pointSize', 5)
+            .setOption('colors', colores)
+            .setOption('series', seriesOptions)
+            .build();
+
+        insertarBlobFlotante(chart.getAs('image/png'), rango);
+    } catch (e) {
+        Logger.log('Error generando gráfico de durezas: ' + e.message);
     }
 }
 

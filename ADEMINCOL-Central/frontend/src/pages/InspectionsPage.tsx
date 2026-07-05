@@ -9,11 +9,15 @@ import { fetchInspections, generateReport, runSync } from "../mock/client";
 import type { InspectionListItem, ReportTypeCode } from "../types";
 import { RealMtInspectionsPanel } from "../components/domain/RealMtInspectionsPanel";
 import { RealPmiInspectionsPanel } from "../components/domain/RealPmiInspectionsPanel";
+import { Real570InspectionsPanel } from "../components/domain/Real570InspectionsPanel";
+import { Real510InspectionsPanel } from "../components/domain/Real510InspectionsPanel";
 
-const TYPE_TABS: { code: ReportTypeCode | "TODOS"; label: string }[] = [
+const TYPE_TABS: { code: ReportTypeCode | "TODOS" | "570" | "510"; label: string }[] = [
   { code: "TODOS", label: "Todos" },
   { code: "MT", label: "MT" },
   { code: "PMI", label: "PMI" },
+  { code: "570", label: "API 570" },
+  { code: "510", label: "API 510" },
   { code: "VT_SOLDADAS", label: "VT Soldadas" },
   { code: "UT_ESPESORES", label: "UT Espesores" },
 ];
@@ -23,7 +27,7 @@ export function InspectionsPage() {
   const toast = useToast();
   const [items, setItems] = useState<InspectionListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<ReportTypeCode | "TODOS">("TODOS");
+  const [tab, setTab] = useState<ReportTypeCode | "TODOS" | "570" | "510">("TODOS");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [generatingIds, setGeneratingIds] = useState<Set<number>>(new Set());
@@ -110,7 +114,7 @@ export function InspectionsPage() {
             Datos sincronizados desde Google Sheets (AppSheet)
           </p>
         </div>
-        {tab !== "MT" && tab !== "PMI" && canManage && (
+        {tab !== "MT" && tab !== "PMI" && tab !== "570" && tab !== "510" && canManage && (
           <button
             onClick={handleSync}
             disabled={syncing}
@@ -142,6 +146,10 @@ export function InspectionsPage() {
         <RealMtInspectionsPanel />
       ) : tab === "PMI" ? (
         <RealPmiInspectionsPanel />
+      ) : tab === "570" ? (
+        <Real570InspectionsPanel />
+      ) : tab === "510" ? (
+        <Real510InspectionsPanel />
       ) : (
         <>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

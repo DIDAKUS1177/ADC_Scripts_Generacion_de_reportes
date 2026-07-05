@@ -2,28 +2,30 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Eye, ImageIcon, PencilLine } from "lucide-react";
 import {
   downloadJobResult,
-  fetchRealPmiInspectionDetail,
-  fetchRealPmiInspections,
+  fetchReal570InspectionDetail,
+  fetchReal570Inspections,
   getJobStatus,
   startReportJob,
   PreviewApiError,
-  type PmiPreviewDetail,
-  type PmiPreviewItem,
+  type Sh570PreviewDetail,
+  type Sh570PreviewItem,
 } from "../../api/previewClient";
 import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
 import { useToast } from "../ui/Toast";
 
-// Panel de datos REALES de PMI — Caracterización de Materiales (Google
-// Sheets, sin BD, sin auth). Mismo patrón que RealMtInspectionsPanel:
-// datos generales editables (solo afectan el reporte generado) + barra de
-// progreso con polling del job.
-export function RealPmiInspectionsPanel() {
+// Panel de datos REALES de API 570 (Inspección Visual de Tubería). A
+// diferencia de MT/PMI, el reporte tiene 15 secciones independientes con
+// cientos de registros/fotos posibles — en vez de mostrar cada sección
+// completa en el visualizador (poco práctico), se muestra un resumen de
+// conteos por sección. Los datos generales sí son editables, igual que en
+// MT/PMI. `ot` es texto libre (no requiere OT creada en la plataforma).
+export function Real570InspectionsPanel() {
   const toast = useToast();
-  const [items, setItems] = useState<PmiPreviewItem[] | null>(null);
+  const [items, setItems] = useState<Sh570PreviewItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<PmiPreviewDetail | null>(null);
+  const [detail, setDetail] = useState<Sh570PreviewDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [job, setJob] = useState<{ pct: number; etapa: string } | null>(null);
@@ -43,7 +45,7 @@ export function RealPmiInspectionsPanel() {
   function load() {
     setError(null);
     setItems(null);
-    fetchRealPmiInspections()
+    fetchReal570Inspections()
       .then(setItems)
       .catch((e) => setError(e instanceof Error ? e.message : "Error desconocido"));
   }
@@ -55,12 +57,12 @@ export function RealPmiInspectionsPanel() {
     };
   }, []);
 
-  function openDetail(idGeneral: string) {
-    setSelected(idGeneral);
+  function openDetail(idApi570: string) {
+    setSelected(idApi570);
     setDetail(null);
     setDetailError(null);
     setEdits({});
-    fetchRealPmiInspectionDetail(idGeneral)
+    fetchReal570InspectionDetail(idApi570)
       .then(setDetail)
       .catch((e) => setDetailError(e instanceof Error ? e.message : "Error desconocido"));
   }
@@ -69,7 +71,7 @@ export function RealPmiInspectionsPanel() {
     if (!selected || job) return;
     setJob({ pct: 0, etapa: "Iniciando..." });
     try {
-      const jobId = await startReportJob("pmi", selected, edits);
+      const jobId = await startReportJob("570", selected, edits);
       pollRef.current = window.setInterval(async () => {
         try {
           const status = await getJobStatus(jobId);
@@ -81,7 +83,7 @@ export function RealPmiInspectionsPanel() {
           pollRef.current = null;
           if (status.estado === "DONE") {
             setJob({ pct: 100, etapa: "Descargando..." });
-            await downloadJobResult(jobId, "pmi", selected);
+            await downloadJobResult(jobId, "570", selected);
             toast.success("Reporte generado y descargado.");
             status.warnings.forEach((w) => toast.error(`⚠️ ${w}`));
           } else {
@@ -105,7 +107,7 @@ export function RealPmiInspectionsPanel() {
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (items !== null && items.length === 0) {
     return (
-      <EmptyState title="Sin informes" description="La hoja 1_general no tiene id_general con datos." />
+      <EmptyState title="Sin informes" description="La hoja #1_informaciongeneral no tiene id_api570 con datos." />
     );
   }
 
@@ -116,47 +118,51 @@ export function RealPmiInspectionsPanel() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por ID, cliente, OT, fecha..."
+            placeholder="Buscar por ID, cliente, OT, sistema, fecha..."
             className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
           />
         </div>
         <div className="overflow-auto">
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 z-10 bg-ink-50 text-left text-xs font-semibold uppercase text-ink-500 shadow-sm">
-            <tr>
-              <th className="px-4 py-2.5">ID Informe</th>
-              <th className="px-4 py-2.5">Cliente</th>
-              <th className="px-4 py-2.5">OT</th>
-              <th className="px-4 py-2.5">Estado</th>
-              <th className="px-4 py-2.5"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ink-100">
-            {filtered?.map((it) => (
-              <tr
-                key={it.id}
-                className={`cursor-pointer hover:bg-ink-50/60 ${
-                  selected === it.idInforme ? "bg-brand-50" : ""
-                }`}
-                onClick={() => openDetail(it.idInforme)}
-              >
-                <td className="px-4 py-2.5 font-mono text-xs text-ink-800">{it.idInforme}</td>
-                <td className="px-4 py-2.5 text-ink-600">{it.cliente ?? "-"}</td>
-                <td className="px-4 py-2.5 max-w-[160px] truncate text-ink-600" title={it.workOrderNumero ?? ""}>
-                  {it.workOrderNumero ?? "-"}
-                </td>
-                <td className="px-4 py-2.5">
-                  <Badge tone={it.estadoReporte === "GENERADO" ? "green" : "gray"}>
-                    {it.estadoReporte === "GENERADO" ? "Generado" : "Pendiente"}
-                  </Badge>
-                </td>
-                <td className="px-4 py-2.5 text-ink-400">
-                  <Eye size={14} />
-                </td>
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 z-10 bg-ink-50 text-left text-xs font-semibold uppercase text-ink-500 shadow-sm">
+              <tr>
+                <th className="px-4 py-2.5">ID Informe</th>
+                <th className="px-4 py-2.5">Cliente</th>
+                <th className="px-4 py-2.5">Fecha</th>
+                <th className="px-4 py-2.5">OT</th>
+                <th className="px-4 py-2.5">Estado</th>
+                <th className="px-4 py-2.5"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-ink-100">
+              {filtered?.map((it) => (
+                <tr
+                  key={it.id}
+                  className={`cursor-pointer hover:bg-ink-50/60 ${
+                    selected === it.idInforme ? "bg-brand-50" : ""
+                  }`}
+                  onClick={() => openDetail(it.idInforme)}
+                >
+                  <td className="px-4 py-2.5 font-mono text-xs text-ink-800">{it.idInforme}</td>
+                  <td className="max-w-[120px] truncate px-4 py-2.5 text-ink-600" title={it.cliente ?? ""}>
+                    {it.cliente ?? "-"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-ink-600">{it.fecha ?? "-"}</td>
+                  <td className="px-4 py-2.5 max-w-[140px] truncate text-ink-600" title={it.workOrderNumero ?? ""}>
+                    {it.workOrderNumero ?? "-"}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <Badge tone={it.estadoReporte === "GENERADO" ? "green" : "gray"}>
+                      {it.estadoReporte === "GENERADO" ? "Generado" : "Pendiente"}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-2.5 text-ink-400">
+                    <Eye size={14} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -166,7 +172,7 @@ export function RealPmiInspectionsPanel() {
             Selecciona un informe de la lista para ver sus datos reales.
           </p>
         )}
-        {selected && !detail && !detailError && <Spinner label="Cargando detalle..." />}
+        {selected && !detail && !detailError && <Spinner label="Cargando detalle (15 secciones)..." />}
         {detailError && <ErrorState message={detailError} />}
         {detail && (
           <div>
@@ -174,7 +180,7 @@ export function RealPmiInspectionsPanel() {
               <div>
                 <p className="font-mono text-sm font-bold text-ink-900">{detail.idInforme}</p>
                 <p className="text-xs text-ink-400">
-                  {detail.cliente} · {detail.fecha}
+                  {detail.cliente} · {detail.fecha || "sin fecha"} · OT: {detail.workOrderNumero || "sin OT"}
                 </p>
               </div>
               {!job && (
@@ -200,6 +206,9 @@ export function RealPmiInspectionsPanel() {
                     style={{ width: `${job.pct}%` }}
                   />
                 </div>
+                <p className="mt-1.5 text-[11px] text-brand-600">
+                  Reportes con muchas fotos pueden tardar varios minutos — se descargan e insertan una por una.
+                </p>
               </div>
             )}
 
@@ -226,63 +235,24 @@ export function RealPmiInspectionsPanel() {
               ))}
             </div>
 
-            <p className="mb-2 text-xs font-semibold uppercase text-ink-400">
-              Química ({detail.quimica.length})
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-400">
+              <ImageIcon size={12} /> Secciones ({detail.secciones.filter((s) => s.registros > 0).length} con datos · {detail.totalFotos} fotos totales)
             </p>
-            <div className="mb-4 flex flex-wrap gap-1.5">
-              {detail.quimica.map((q, i) => (
-                <span key={i} className="rounded-full bg-ink-50 px-2.5 py-1 text-xs">
-                  <span className="font-medium">{q.Elemento || "?"}</span>{" "}
-                  <span className="text-ink-500">{q.Valor}</span>
-                </span>
+            <div className="space-y-1">
+              {detail.secciones.map((s) => (
+                <div
+                  key={s.key}
+                  className={`flex items-center justify-between rounded-lg px-3 py-1.5 text-xs ${
+                    s.registros > 0 ? "bg-ink-50" : "bg-ink-50/40 text-ink-400"
+                  }`}
+                >
+                  <span className="font-medium">{s.sheet.replace(/^#\d+_/, "").replace(/_/g, " ")}</span>
+                  <span>
+                    {s.registros} registro{s.registros !== 1 ? "s" : ""} · {s.fotos} foto{s.fotos !== 1 ? "s" : ""}
+                  </span>
+                </div>
               ))}
-              {detail.quimica.length === 0 && (
-                <p className="text-xs text-ink-400">Sin mediciones de química registradas.</p>
-              )}
             </div>
-
-            <p className="mb-2 text-xs font-semibold uppercase text-ink-400">
-              Durezas ({detail.durezas.length})
-            </p>
-            <div className="mb-4 flex flex-wrap gap-1.5">
-              {detail.durezas.slice(0, 30).map((d, i) => (
-                <span key={i} className="rounded-full bg-ink-50 px-2.5 py-1 text-xs">
-                  {d.Dureza}
-                  {d.ksi ? <span className="text-ink-500"> · {d.ksi} ksi</span> : null}
-                </span>
-              ))}
-              {detail.durezas.length > 30 && (
-                <span className="rounded-full bg-ink-100 px-2.5 py-1 text-xs text-ink-500">
-                  +{detail.durezas.length - 30} más
-                </span>
-              )}
-              {detail.durezas.length === 0 && (
-                <p className="text-xs text-ink-400">Sin mediciones de dureza registradas.</p>
-              )}
-            </div>
-
-            <p className="mb-2 text-xs font-semibold uppercase text-ink-400">
-              Fotos ({detail.fotos.length})
-            </p>
-            {detail.fotos.length === 0 ? (
-              <p className="text-xs text-ink-400">Sin fotos registradas.</p>
-            ) : (
-              <div className="grid grid-cols-3 gap-2">
-                {detail.fotos.map((foto, i) => (
-                  <div key={i} className="overflow-hidden rounded-lg border border-ink-200">
-                    <img
-                      src={foto.url}
-                      alt={foto.descripcion}
-                      className="h-20 w-full object-cover"
-                    />
-                    <p className="flex items-center gap-1 px-1.5 py-1 text-[10px] text-ink-600">
-                      <ImageIcon size={10} className="shrink-0" />
-                      <span className="truncate">{foto.descripcion || "Sin descripción"}</span>
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         )}
       </div>

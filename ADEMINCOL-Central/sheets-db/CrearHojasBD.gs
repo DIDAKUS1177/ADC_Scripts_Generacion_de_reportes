@@ -121,7 +121,11 @@ const ESTADOS_OT_VALIDOS = ['PENDIENTE', 'EN_CURSO', 'COMPLETADA', 'CANCELADA'];
 // Técnicas soportadas — deben coincidir con report_types del backend
 // (ver ADEMINCOL-Central/backend/app/sheets_client.py). Se amplía a medida
 // que se conectan más tipos de reporte (VT_SOLDADAS, UT_ESPESORES...).
-const TECNICAS_VALIDAS = ['MT', 'PMI'];
+// '570' (API 570 - Inspección Visual de Tubería) NO usa el modelo OT/Servicio
+// (su Sheet propio ya trae `ot` como texto libre, nunca fue una FK — ver
+// decisión 2026-07-03). Está aquí solo para que los certificados de
+// inspectores puedan marcarse como '570'.
+const TECNICAS_VALIDAS = ['MT', 'PMI', '570', '510'];
 
 function crearEstructuraBD() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();

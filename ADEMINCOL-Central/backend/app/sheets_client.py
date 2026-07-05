@@ -34,6 +34,20 @@ MT_SPREADSHEET_ID = "1J3FcVxay3dNQMG9SnOwfTccezzuBlaL-PPSiEq7Icy8"
 # — parecen catálogos/tablas de referencia de AppSheet o versiones viejas,
 # igual que "1.map"/"6.complementos" en el Sheet de MT.
 PMI_SPREADSHEET_ID = "1F4bR_f0Vyap9yY8iLXrOw75ni3rk1_D1s7xSPlEDosw"
+# API 570 (Inspección Visual de Tubería). Hoja general/activadora:
+# '#1_informaciongeneral' (id_api570). 15 secciones independientes, cada una
+# con su propia hoja de datos + hoja de fotos (`#N_seccion` / `#N_seccion_photos`)
+# — ver report_engine_570.py, SECTIONS_CONFIG. `ot` es texto libre, no una FK
+# a nuestra BD de OTs (decisión 2026-07-03: OT no es obligatoria para 570).
+SHEET_570_ID = "1Qlq1F07XvONIvQAo4-BFuhy9zohn-Z1q17-BOFIwWFI"
+HOJA_570_GENERAL = "#1_informaciongeneral"
+# API 510 (Inspección Visual de Recipientes a Presión). A diferencia de 570,
+# los datos y las fotos viven en DOS spreadsheets separados. Hoja
+# general/activadora: '0.pv_general' (pvid). 11 secciones — ver
+# report_engine_510.py, SECTIONS_CONFIG. `ot` también es texto libre.
+SHEET_510_DATOS_ID = "1RTgmI6Ftwuf3b00ELIgnQZrBvbN3Jiw36HBCAbTWuwY"
+SHEET_510_FOTOS_ID = "1i_pHG65ljg5NidkQa_n611PPSOmVcmNUNZ4mY-mqrpI"
+HOJA_510_GENERAL = "0.pv_general"
 # BD temporal usuarios/work_orders creada con sheets-db/CrearHojasBD.gs
 BD_SPREADSHEET_ID = "1HVGz6v06ML1Ohg3z6n8HS_97etWChev7fkwDgEPOIMo"
 
@@ -68,7 +82,16 @@ def read_sheet_as_dicts(spreadsheet_id: str, sheet_name: str) -> list[dict]:
     out = []
     for row in rows[1:]:
         padded = row + [""] * (len(headers) - len(row))
-        out.append(dict(zip(headers, padded)))
+        # Con headers DUPLICADOS gana la PRIMERA columna (no la última, que
+        # es lo que hacía dict(zip())): iguala el comportamiento de
+        # headers.indexOf() de los scripts GAS originales. Caso real: la hoja
+        # '#1_informaciongeneral' de 570 tiene 'fecha' dos veces (fecha de
+        # inspección y fecha de la firma) y se estaba leyendo la equivocada.
+        d: dict = {}
+        for h, v in zip(headers, padded):
+            if h not in d:
+                d[h] = v
+        out.append(d)
     return out
 
 

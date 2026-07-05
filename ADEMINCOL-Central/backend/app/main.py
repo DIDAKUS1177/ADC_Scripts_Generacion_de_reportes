@@ -16,10 +16,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .report_engine_mt import generar_reporte_mt
 from .report_engine_pmi import calcular_ce, generar_reporte_pmi
+from .report_engine_570 import SECTIONS_CONFIG as SECTIONS_CONFIG_570, generar_reporte_570
+from .report_engine_510 import SECTIONS_CONFIG as SECTIONS_CONFIG_510, generar_reporte_510
 from .sheets_client import (
     BD_SPREADSHEET_ID,
+    HOJA_570_GENERAL,
+    HOJA_510_GENERAL,
     MT_SPREADSHEET_ID,
     PMI_SPREADSHEET_ID,
+    SHEET_570_ID,
+    SHEET_510_DATOS_ID,
+    SHEET_510_FOTOS_ID,
     append_row,
     read_sheet_as_dicts,
     update_cell_by_key,
@@ -435,15 +442,25 @@ def get_pmi_inspection_detail(id_general: str):
     }
 
 
+def _aplicar_overrides(fila_general: dict, overrides: dict):
+    """Aplica los cambios hechos en el visualizador sobre la fila del Sheet.
+    La UI expone 'inspector' pero la columna real se llama 'nombre' — sin
+    este mapeo la edición del inspector se ignoraba silenciosamente (bug
+    corregido 2026-07-03; MT no lo sufría porque usa CAMPOS_EDITABLES)."""
+    alias = {"inspector": "nombre"}
+    for campo_ui, valor in (overrides or {}).items():
+        columna = alias.get(campo_ui, campo_ui)
+        if columna in fila_general and valor is not None:
+            fila_general[columna] = valor
+
+
 def _job_generar_pmi(job_id: str, id_general: str, overrides: dict):
     job = JOBS[job_id]
     try:
         job.update(pct=2, etapa="Leyendo datos del Sheet")
         fila_general, quimica, durezas = _cargar_datos_pmi(id_general)
 
-        for campo_ui, valor in (overrides or {}).items():
-            if campo_ui in fila_general and valor is not None:
-                fila_general[campo_ui] = valor
+        _aplicar_overrides(fila_general, overrides)
 
         firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
         if firma_bd:
@@ -479,6 +496,354 @@ def iniciar_generacion_pmi(id_general: str, payload: dict = Body(default={})):
     JOBS[job_id] = {"estado": "RUNNING", "pct": 0, "etapa": "Iniciando", "error": None,
                     "archivo": None, "nombre": None, "warnings": []}
     thread = threading.Thread(target=_job_generar_pmi, args=(job_id, id_general, overrides), daemon=True)
+    thread.start()
+    return {"jobId": job_id}
+
+
+# =====================================================================
+# Inspecciones API 570 (Inspección Visual de Tubería) — lectura del Sheet
+# real. NO pasa por el modelo OT/Servicio: el campo `ot` de la hoja general
+# es texto libre (nunca fue una FK, ni en el script GAS original) — no se
+# exige crear una OT antes de generar un reporte 570 (decisión 2026-07-03).
+# =====================================================================
+
+@app.get("/api/preview/570")
+def list_570_inspections():
+    try:
+        rows = read_sheet_as_dicts(SHEET_570_ID, HOJA_570_GENERAL)
+    except Exception as e:
+        logger.exception("Error leyendo hoja general de 570")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer el Sheet de 570: {e}")
+
+    items = []
+    for row in rows:
+        id_api570 = row.get("id_api570", "").strip()
+        if not id_api570:
+            continue
+        link_reporte = row.get("linkreporte", "").strip()
+        items.append(
+            {
+                "id": id_api570,
+                "reportType": "570",
+                "idInforme": id_api570,
+                "cliente": row.get("cliente") or None,
+                "fecha": row.get("fecha") or None,
+                "reporteN": row.get("consecutivo") or None,
+                "workOrderId": None,
+                "workOrderNumero": row.get("ot") or None,
+                "estadoReporte": "GENERADO" if link_reporte.startswith("http") else "PENDIENTE",
+                "syncedAt": None,
+                "sistema": row.get("sistema") or None,
+                "inspector": row.get("nombre") or None,
+            }
+        )
+    return items
+
+
+def _cargar_datos_570(id_api570: str):
+    generales = read_sheet_as_dicts(SHEET_570_ID, HOJA_570_GENERAL)
+    fila_general = next(
+        (r for r in generales if r.get("id_api570", "").strip() == id_api570), None
+    )
+    if not fila_general:
+        raise HTTPException(status_code=404, detail=f"No existe el informe {id_api570}")
+
+    secciones_data: dict[str, list[dict]] = {}
+    secciones_fotos: dict[str, list[dict]] = {}
+    for key, config in SECTIONS_CONFIG_570.items():
+        try:
+            filas = read_sheet_as_dicts(SHEET_570_ID, config["sheet"])
+        except Exception:
+            logger.warning("No se pudo leer la sección %s de 570", config["sheet"])
+            filas = []
+        secciones_data[key] = [r for r in filas if r.get("id_api570", "").strip() == id_api570]
+
+        try:
+            fotos_raw = read_sheet_as_dicts(SHEET_570_ID, config["photo_sheet"])
+        except Exception:
+            logger.warning("No se pudo leer fotos de la sección %s de 570", config["photo_sheet"])
+            fotos_raw = []
+        secciones_fotos[key] = [
+            {"url": f.get("photo_url", ""), "descripcion": f.get("descripcion", "")}
+            for f in fotos_raw
+            if f.get("id_api570", "").strip() == id_api570 and f.get("photo_url", "").strip().startswith("http")
+        ]
+
+    return fila_general, secciones_data, secciones_fotos
+
+
+@app.get("/api/preview/570/{id_api570}")
+def get_570_inspection_detail(id_api570: str):
+    try:
+        fila_general, secciones_data, secciones_fotos = _cargar_datos_570(id_api570)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error leyendo hojas de 570")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer el Sheet de 570: {e}")
+
+    link_reporte = fila_general.get("linkreporte", "").strip()
+    secciones_resumen = [
+        {
+            "key": key,
+            "sheet": SECTIONS_CONFIG_570[key]["sheet"],
+            "registros": len(secciones_data.get(key, [])),
+            "fotos": len(secciones_fotos.get(key, [])),
+        }
+        for key in SECTIONS_CONFIG_570
+    ]
+    total_fotos = sum(s["fotos"] for s in secciones_resumen)
+
+    return {
+        "id": id_api570,
+        "reportType": "570",
+        "idInforme": id_api570,
+        "cliente": fila_general.get("cliente") or None,
+        "fecha": fila_general.get("fecha") or None,
+        "reporteN": fila_general.get("consecutivo") or None,
+        "workOrderId": None,
+        "workOrderNumero": fila_general.get("ot") or None,
+        "estadoReporte": "GENERADO" if link_reporte.startswith("http") else "PENDIENTE",
+        "syncedAt": None,
+        "datosGenerales": {
+            "cliente": fila_general.get("cliente"),
+            "consecutivo": fila_general.get("consecutivo"),
+            "fecha": fila_general.get("fecha"),
+            "ubicacion": fila_general.get("ubicacion"),
+            "ot": fila_general.get("ot"),
+            "servicio": fila_general.get("servicio"),
+            "codigo_fabricacion": fila_general.get("codigo_fabricacion"),
+            "ano_fabricacion": fila_general.get("ano_fabricacion"),
+            "sistema": fila_general.get("sistema"),
+            "subsistema": fila_general.get("subsistema"),
+            "presion_operacion": fila_general.get("presion_operacion"),
+            "temperatura_operacion": fila_general.get("temperatura_operacion"),
+            "inspector": fila_general.get("nombre"),
+            "cargo": fila_general.get("cargo"),
+            "certificacion": fila_general.get("certificacion"),
+        },
+        "secciones": secciones_resumen,
+        "totalFotos": total_fotos,
+        "fotos": [],
+        "historialReportes": [],
+    }
+
+
+def _job_generar_570(job_id: str, id_api570: str, overrides: dict):
+    job = JOBS[job_id]
+    try:
+        job.update(pct=2, etapa="Leyendo datos del Sheet")
+        fila_general, secciones_data, secciones_fotos = _cargar_datos_570(id_api570)
+
+        _aplicar_overrides(fila_general, overrides)
+
+        firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
+        if firma_bd:
+            fila_general["link_firma"] = firma_bd
+
+        warnings = []
+        inspector_nombre = fila_general.get("nombre", "")
+        if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "570"):
+            warnings.append(
+                f"El inspector '{inspector_nombre}' no tiene un certificado de API 570 registrado."
+            )
+
+        def progreso(pct: int, etapa: str):
+            job.update(pct=pct, etapa=etapa)
+
+        contenido = generar_reporte_570(fila_general, secciones_data, secciones_fotos, progreso=progreso)
+        job.update(
+            estado="DONE", pct=100, etapa="Completado",
+            archivo=contenido, nombre=f"Reporte_570_{id_api570}.xlsx",
+            warnings=warnings,
+        )
+    except HTTPException as e:
+        job.update(estado="ERROR", error=e.detail)
+    except Exception as e:
+        logger.exception("Error en job de generación 570 %s", job_id)
+        job.update(estado="ERROR", error=str(e))
+
+
+@app.post("/api/preview/570/{id_api570}/generar-reporte")
+def iniciar_generacion_570(id_api570: str, payload: dict = Body(default={})):
+    overrides = payload.get("overrides", {})
+    job_id = uuid.uuid4().hex
+    JOBS[job_id] = {"estado": "RUNNING", "pct": 0, "etapa": "Iniciando", "error": None,
+                    "archivo": None, "nombre": None, "warnings": []}
+    thread = threading.Thread(target=_job_generar_570, args=(job_id, id_api570, overrides), daemon=True)
+    thread.start()
+    return {"jobId": job_id}
+
+
+# =====================================================================
+# Inspecciones API 510 (Inspección Visual de Recipientes a Presión) — igual
+# que 570 pero con datos y fotos en DOS spreadsheets separados. Tampoco pasa
+# por el modelo OT/Servicio (mismo criterio que 570).
+# =====================================================================
+
+@app.get("/api/preview/510")
+def list_510_inspections():
+    try:
+        rows = read_sheet_as_dicts(SHEET_510_DATOS_ID, HOJA_510_GENERAL)
+    except Exception as e:
+        logger.exception("Error leyendo hoja general de 510")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer el Sheet de 510: {e}")
+
+    items = []
+    for row in rows:
+        pvid = row.get("pvid", "").strip()
+        if not pvid:
+            continue
+        link_reporte = row.get("linkreporte", "").strip()
+        items.append(
+            {
+                "id": pvid,
+                "reportType": "510",
+                "idInforme": pvid,
+                "cliente": row.get("cliente") or None,
+                "fecha": row.get("fechainsp") or None,
+                "reporteN": row.get("consecutivo") or None,
+                "workOrderId": None,
+                "workOrderNumero": row.get("ot") or None,
+                "estadoReporte": "GENERADO" if link_reporte.startswith("http") else "PENDIENTE",
+                "syncedAt": None,
+                "sistema": row.get("tag") or None,
+                "inspector": row.get("nombre") or None,
+            }
+        )
+    return items
+
+
+def _cargar_datos_510(pvid: str):
+    generales = read_sheet_as_dicts(SHEET_510_DATOS_ID, HOJA_510_GENERAL)
+    fila_general = next(
+        (r for r in generales if r.get("pvid", "").strip() == pvid), None
+    )
+    if not fila_general:
+        raise HTTPException(status_code=404, detail=f"No existe el informe {pvid}")
+
+    secciones_data: dict[str, list[dict]] = {}
+    secciones_fotos: dict[str, list[dict]] = {}
+    for key, config in SECTIONS_CONFIG_510.items():
+        try:
+            filas = read_sheet_as_dicts(SHEET_510_DATOS_ID, config["sheet"])
+        except Exception:
+            logger.warning("No se pudo leer la sección %s de 510", config["sheet"])
+            filas = []
+        secciones_data[key] = [r for r in filas if r.get("pvid", "").strip() == pvid]
+
+        try:
+            fotos_raw = read_sheet_as_dicts(SHEET_510_FOTOS_ID, config["photo_sheet"])
+        except Exception:
+            logger.warning("No se pudo leer fotos de la sección %s de 510", config["photo_sheet"])
+            fotos_raw = []
+        link_col = config["photo_link_col"].lower()
+        secciones_fotos[key] = [
+            {"url": f.get(link_col, ""), "descripcion": f.get("descripccion", "")}
+            for f in fotos_raw
+            if f.get("pvid", "").strip() == pvid and f.get(link_col, "").strip().startswith("http")
+        ]
+
+    return fila_general, secciones_data, secciones_fotos
+
+
+@app.get("/api/preview/510/{pvid}")
+def get_510_inspection_detail(pvid: str):
+    try:
+        fila_general, secciones_data, secciones_fotos = _cargar_datos_510(pvid)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error leyendo hojas de 510")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer el Sheet de 510: {e}")
+
+    link_reporte = fila_general.get("linkreporte", "").strip()
+    secciones_resumen = [
+        {
+            "key": key,
+            "sheet": SECTIONS_CONFIG_510[key]["sheet"],
+            "registros": len(secciones_data.get(key, [])),
+            "fotos": len(secciones_fotos.get(key, [])),
+        }
+        for key in SECTIONS_CONFIG_510
+    ]
+    total_fotos = sum(s["fotos"] for s in secciones_resumen)
+
+    return {
+        "id": pvid,
+        "reportType": "510",
+        "idInforme": pvid,
+        "cliente": fila_general.get("cliente") or None,
+        "fecha": fila_general.get("fechainsp") or None,
+        "reporteN": fila_general.get("consecutivo") or None,
+        "workOrderId": None,
+        "workOrderNumero": fila_general.get("ot") or None,
+        "estadoReporte": "GENERADO" if link_reporte.startswith("http") else "PENDIENTE",
+        "syncedAt": None,
+        "datosGenerales": {
+            "cliente": fila_general.get("cliente"),
+            "consecutivo": fila_general.get("consecutivo"),
+            "fechainsp": fila_general.get("fechainsp"),
+            "ubicación": fila_general.get("ubicación"),
+            "tag": fila_general.get("tag"),
+            "servicio": fila_general.get("servicio"),
+            "fabricante": fila_general.get("fabricante"),
+            "yearfabrication": fila_general.get("yearfabrication"),
+            "mawp": fila_general.get("mawp"),
+            "designtemp": fila_general.get("designtemp"),
+            "matcuerpo": fila_general.get("matcuerpo"),
+            "capacidad": fila_general.get("capacidad"),
+            "inspector": fila_general.get("nombre"),
+        },
+        "secciones": secciones_resumen,
+        "totalFotos": total_fotos,
+        "fotos": [],
+        "historialReportes": [],
+    }
+
+
+def _job_generar_510(job_id: str, pvid: str, overrides: dict):
+    job = JOBS[job_id]
+    try:
+        job.update(pct=2, etapa="Leyendo datos del Sheet")
+        fila_general, secciones_data, secciones_fotos = _cargar_datos_510(pvid)
+
+        _aplicar_overrides(fila_general, overrides)
+
+        firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
+        if firma_bd:
+            fila_general["link_firma"] = firma_bd
+
+        warnings = []
+        inspector_nombre = fila_general.get("nombre", "")
+        if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "510"):
+            warnings.append(
+                f"El inspector '{inspector_nombre}' no tiene un certificado de API 510 registrado."
+            )
+
+        def progreso(pct: int, etapa: str):
+            job.update(pct=pct, etapa=etapa)
+
+        contenido = generar_reporte_510(fila_general, secciones_data, secciones_fotos, progreso=progreso)
+        job.update(
+            estado="DONE", pct=100, etapa="Completado",
+            archivo=contenido, nombre=f"Reporte_510_{pvid}.xlsx",
+            warnings=warnings,
+        )
+    except HTTPException as e:
+        job.update(estado="ERROR", error=e.detail)
+    except Exception as e:
+        logger.exception("Error en job de generación 510 %s", job_id)
+        job.update(estado="ERROR", error=str(e))
+
+
+@app.post("/api/preview/510/{pvid}/generar-reporte")
+def iniciar_generacion_510(pvid: str, payload: dict = Body(default={})):
+    overrides = payload.get("overrides", {})
+    job_id = uuid.uuid4().hex
+    JOBS[job_id] = {"estado": "RUNNING", "pct": 0, "etapa": "Iniciando", "error": None,
+                    "archivo": None, "nombre": None, "warnings": []}
+    thread = threading.Thread(target=_job_generar_510, args=(job_id, pvid, overrides), daemon=True)
     thread.start()
     return {"jobId": job_id}
 
@@ -841,3 +1206,106 @@ def crear_servicio(payload: dict = Body(...)):
         logger.exception("Error creando servicio")
         raise HTTPException(status_code=502, detail=f"No se pudo escribir en la BD: {e}")
     return {"ok": True, "idServicio": id_servicio}
+
+
+# =====================================================================
+# Dashboard — agregados reales (reunión 2026-07-03: "mejora ese dashboard,
+# ajustado para que el administrador mire los activos, los supervisores
+# inspectores"). ADMIN ve todo el negocio (usuarios, OTs, servicios,
+# certificados por vencer, reportes por técnica). SUPERVISOR ve sus propias
+# OTs/servicios. INSPECTOR ve los servicios que tiene asignados. Reemplaza
+# los datos simulados de mock/client.ts en DashboardPage.tsx.
+# =====================================================================
+
+def _vencimiento_proximo(fecha_str: str, dias: int = 60) -> bool:
+    if not fecha_str:
+        return False
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            fecha = datetime.strptime(fecha_str.strip(), fmt)
+            return 0 <= (fecha - datetime.now()).days <= dias
+        except ValueError:
+            continue
+    return False
+
+
+@app.get("/api/preview/dashboard")
+def get_dashboard(usuario: str | None = None, rol: str | None = None):
+    try:
+        usuarios = read_sheet_as_dicts(BD_SPREADSHEET_ID, "usuarios")
+        ots = read_sheet_as_dicts(BD_SPREADSHEET_ID, "work_orders")
+        servicios = read_sheet_as_dicts(BD_SPREADSHEET_ID, "servicios")
+        certificados = read_sheet_as_dicts(BD_SPREADSHEET_ID, "certificados_usuarios")
+    except Exception as e:
+        logger.exception("Error leyendo BD para dashboard")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer la BD: {e}")
+
+    ots = [r for r in ots if r.get("numero", "").strip()]
+    servicios = [r for r in servicios if r.get("id_servicio", "").strip()]
+    usuarios_activos = [r for r in usuarios if r.get("usuario", "").strip() and str(r.get("activo", "")).strip().upper() in ("TRUE", "VERDADERO", "SÍ", "SI", "1")]
+
+    otsPorEstado: dict[str, int] = {}
+    for r in ots:
+        estado = r.get("estado") or "PENDIENTE"
+        otsPorEstado[estado] = otsPorEstado.get(estado, 0) + 1
+
+    serviciosPorTecnica: dict[str, int] = {}
+    serviciosPendientes = 0
+    for r in servicios:
+        tecnica = r.get("tecnica") or "?"
+        serviciosPorTecnica[tecnica] = serviciosPorTecnica.get(tecnica, 0) + 1
+        if not r.get("inspector_usuario", "").strip():
+            serviciosPendientes += 1
+
+    certificadosPorVencer = [
+        {
+            "usuario": c.get("usuario"),
+            "tecnica": c.get("tecnica"),
+            "nombreCertificado": c.get("nombre_certificado"),
+            "fechaVencimiento": c.get("fecha_vencimiento"),
+        }
+        for c in certificados
+        if _vencimiento_proximo(c.get("fecha_vencimiento", ""))
+    ]
+
+    # Reportes por técnica: reutiliza los endpoints de lectura ya construidos
+    # (MT/PMI/570) — cada uno hace UNA lectura de su hoja general.
+    reportesPorTipo = {}
+    for tipo, fn in (("MT", list_mt_inspections), ("PMI", list_pmi_inspections), ("570", list_570_inspections), ("510", list_510_inspections)):
+        try:
+            items = fn()
+            generados = sum(1 for i in items if i["estadoReporte"] == "GENERADO")
+            reportesPorTipo[tipo] = {"total": len(items), "generados": generados, "pendientes": len(items) - generados}
+        except Exception:
+            reportesPorTipo[tipo] = {"total": 0, "generados": 0, "pendientes": 0}
+
+    data = {
+        "usuariosActivos": len(usuarios_activos),
+        "otsTotal": len(ots),
+        "otsPorEstado": otsPorEstado,
+        "serviciosTotal": len(servicios),
+        "serviciosPorTecnica": serviciosPorTecnica,
+        "serviciosPendientes": serviciosPendientes,
+        "certificadosPorVencer": certificadosPorVencer,
+        "reportesPorTipo": reportesPorTipo,
+    }
+
+    # Recortes personales para supervisor/inspector (si se identifica al usuario)
+    if usuario and rol == "SUPERVISOR":
+        data["misOts"] = [
+            {"idOt": r.get("id_ot"), "numero": r.get("numero"), "cliente": r.get("cliente"), "estado": r.get("estado")}
+            for r in ots if r.get("supervisor_usuario", "").strip() == usuario
+        ]
+        mis_ot_ids = {o["idOt"] for o in data["misOts"]}
+        data["misServicios"] = [
+            {"idServicio": r.get("id_servicio"), "idOt": r.get("id_ot"), "tecnica": r.get("tecnica"), "estado": r.get("estado")}
+            for r in servicios if r.get("id_ot", "").strip() in mis_ot_ids
+        ]
+    elif usuario and rol == "INSPECTOR":
+        data["misServicios"] = [
+            {"idServicio": r.get("id_servicio"), "idOt": r.get("id_ot"), "tecnica": r.get("tecnica"), "estado": r.get("estado")}
+            for r in servicios if r.get("inspector_usuario", "").strip() == usuario
+        ]
+        data["misCertificadosPorVencer"] = [c for c in certificadosPorVencer if c["usuario"] == usuario]
+
+    return data

@@ -15,6 +15,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.utils.cell import coordinate_from_string
 
+from .chart_durezas import generar_grafico_durezas
 from .image_utils import descargar_imagen, insertar_imagen_centrada
 
 logger = logging.getLogger("report_engine_pmi")
@@ -228,9 +229,31 @@ def generar_reporte_pmi(
     total_imgs = len(CELDAS_IMAGENES)
     for i, (campo, celda) in enumerate(CELDAS_IMAGENES.items()):
         url = fila_general.get(campo)
+        pct = 45 + round((i / max(total_imgs, 1)) * 50)
+
+        # link_imagen_10 (celda R202) es el gráfico Tensión vs Punto que
+        # antes se generaba corriendo un script en R y se subía a mano
+        # (decisión 2026-07-04). Si el inspector no subió nada ahí, se
+        # genera automáticamente aquí mismo a partir de las durezas del
+        # informe. Si SÍ subió una imagen manual, se respeta esa (permite
+        # reemplazar el gráfico automático en un caso puntual).
+        if campo == "link_imagen_10" and not url:
+            _reportar(pct, "Generando gráfico de durezas")
+            ksis = []
+            for row in durezas:
+                raw = str(row.get("ksi", "")).strip().replace(",", ".")
+                try:
+                    ksis.append(float(raw))
+                except ValueError:
+                    continue
+            grafico_bytes = generar_grafico_durezas(ksis)
+            if grafico_bytes:
+                col, fila = coordinate_from_string(celda)
+                insertar_imagen_centrada(ws, grafico_bytes, f"{col}{fila}")
+            continue
+
         if not url:
             continue
-        pct = 45 + round((i / max(total_imgs, 1)) * 50)
         _reportar(pct, f"Descargando imagen {i + 1} de {total_imgs}")
         img_bytes = descargar_imagen(url)
         if img_bytes:

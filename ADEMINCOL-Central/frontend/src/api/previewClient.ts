@@ -116,6 +116,96 @@ export async function fetchRealPmiInspectionDetail(idGeneral: string): Promise<P
   return res.json();
 }
 
+// ---- API 570: Inspección Visual de Tubería ----
+// No pasa por el modelo OT/Servicio: `ot` en el Sheet es texto libre, nunca
+// fue una FK (ver decisión reunión 2026-07-03 — la OT no es obligatoria).
+
+export interface Sh570PreviewItem {
+  id: string;
+  reportType: "570";
+  idInforme: string;
+  cliente: string | null;
+  fecha: string | null;
+  reporteN: string | null;
+  workOrderNumero: string | null;
+  estadoReporte: "GENERADO" | "PENDIENTE";
+  sistema: string | null;
+  inspector: string | null;
+}
+
+export interface Sh570SeccionResumen {
+  key: string;
+  sheet: string;
+  registros: number;
+  fotos: number;
+}
+
+export interface Sh570PreviewDetail extends Sh570PreviewItem {
+  datosGenerales: Record<string, string | null>;
+  secciones: Sh570SeccionResumen[];
+  totalFotos: number;
+  fotos: MtPreviewFoto[];
+}
+
+export async function fetchReal570Inspections(): Promise<Sh570PreviewItem[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/570`);
+  if (!res.ok) {
+    throw new PreviewApiError(
+      "No se pudo conectar con el backend de preview. ¿Está corriendo en el puerto 8000?"
+    );
+  }
+  return res.json();
+}
+
+export async function fetchReal570InspectionDetail(idApi570: string): Promise<Sh570PreviewDetail> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/570/${encodeURIComponent(idApi570)}`);
+  if (!res.ok) {
+    throw new PreviewApiError("No se pudo cargar el detalle real de esta inspección.");
+  }
+  return res.json();
+}
+
+// ---- API 510: Inspección Visual de Recipientes a Presión ----
+// Igual que 570: no pasa por el modelo OT/Servicio, `ot` es texto libre.
+
+export interface Sh510PreviewItem {
+  id: string;
+  reportType: "510";
+  idInforme: string;
+  cliente: string | null;
+  fecha: string | null;
+  reporteN: string | null;
+  workOrderNumero: string | null;
+  estadoReporte: "GENERADO" | "PENDIENTE";
+  sistema: string | null;
+  inspector: string | null;
+}
+
+export interface Sh510PreviewDetail extends Sh510PreviewItem {
+  datosGenerales: Record<string, string | null>;
+  secciones: Sh570SeccionResumen[];
+  totalFotos: number;
+  fotos: MtPreviewFoto[];
+}
+
+export async function fetchReal510Inspections(): Promise<Sh510PreviewItem[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/510`);
+  if (!res.ok) {
+    throw new PreviewApiError(
+      "No se pudo conectar con el backend de preview. ¿Está corriendo en el puerto 8000?"
+    );
+  }
+  return res.json();
+}
+
+export async function fetchReal510InspectionDetail(pvid: string): Promise<Sh510PreviewDetail> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/510/${encodeURIComponent(pvid)}`);
+  if (!res.ok) {
+    throw new PreviewApiError("No se pudo cargar el detalle real de esta inspección.");
+  }
+  return res.json();
+}
+
 async function leerDetalleError(res: Response, fallback: string): Promise<string> {
   try {
     const body = await res.json();
@@ -135,7 +225,7 @@ export interface JobStatus {
   warnings: string[];
 }
 
-export type ReportKind = "mt" | "pmi";
+export type ReportKind = "mt" | "pmi" | "570" | "510";
 
 export async function startReportJob(
   tipo: ReportKind,
@@ -194,7 +284,7 @@ export interface RealUser {
   createdAt: string | null;
 }
 
-export type Tecnica = "MT" | "PMI";
+export type Tecnica = "MT" | "PMI" | "570" | "510";
 
 export interface UserCertificate {
   idCertificado?: string;
@@ -349,5 +439,56 @@ export async function crearServicio(idOt: string, tecnica: Tecnica): Promise<{ i
     body: JSON.stringify({ idOt, tecnica }),
   });
   if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo crear el servicio."));
+  return res.json();
+}
+
+// ---- Dashboard (agregados reales — ver decisión reunión 2026-07-03) ----
+
+export interface DashboardReporteTipo {
+  total: number;
+  generados: number;
+  pendientes: number;
+}
+
+export interface DashboardCertificadoPorVencer {
+  usuario: string;
+  tecnica: string;
+  nombreCertificado: string;
+  fechaVencimiento: string;
+}
+
+export interface DashboardMiOt {
+  idOt: string;
+  numero: string;
+  cliente: string | null;
+  estado: string;
+}
+
+export interface DashboardMiServicio {
+  idServicio: string;
+  idOt: string;
+  tecnica: string;
+  estado: string;
+}
+
+export interface RealDashboardData {
+  usuariosActivos: number;
+  otsTotal: number;
+  otsPorEstado: Record<string, number>;
+  serviciosTotal: number;
+  serviciosPorTecnica: Record<string, number>;
+  serviciosPendientes: number;
+  certificadosPorVencer: DashboardCertificadoPorVencer[];
+  reportesPorTipo: Record<string, DashboardReporteTipo>;
+  misOts?: DashboardMiOt[];
+  misServicios?: DashboardMiServicio[];
+  misCertificadosPorVencer?: DashboardCertificadoPorVencer[];
+}
+
+export async function fetchRealDashboard(usuario: string, rol: string): Promise<RealDashboardData> {
+  const res = await fetch(
+    `${PREVIEW_API_BASE}/api/preview/dashboard?usuario=${encodeURIComponent(usuario)}&rol=${encodeURIComponent(rol)}`
+  );
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo cargar el dashboard."));
   return res.json();
 }

@@ -18,13 +18,15 @@ hoja `servicios`) porque esa es de nuestro control total.
 
 ## 1. Columnas obligatorias en la hoja GENERAL de cada técnica
 
-Toda hoja "general" (equivalente a `2.general_particulas_magneticas` en MT o
-`1_general` en PMI) debe tener, ADEMÁS de sus columnas propias de datos:
+Toda hoja "general"/madre (equivalente a `2.general_particulas_magneticas` en MT,
+`1_general` en PMI, o `#1_informaciongeneral` en 570) debe tener, ADEMÁS de sus
+columnas propias de datos:
 
 | Columna | Tipo | Quién la llena | Para qué sirve |
 |---|---|---|---|
-| `id_informe` (o `id_general`) | Texto, único | AppSheet (autogenerado) | Ya existe en MT/PMI — identifica el informe individual |
-| `id_servicio` | Texto | **Supervisor**, al generar el servicio (o el inspector lo selecciona de una lista filtrada) | Vincula el informe con el servicio de nuestra BD (`sheets-db` → hoja `servicios` → columna `id_servicio`). Es la clave que permite filtrar en AppSheet "solo mis servicios pendientes" |
+| `id_informe` (o `id_general`, `id_api570`...) | Texto, único | AppSheet (autogenerado) | Identifica el informe individual. Es la clave real para "buscar la inspección" — **nunca la OT** (ver sección 1bis) |
+| `nombre_supervisor` | **Enum buscable** (no texto libre, ver sección 1bis) | El supervisor, al pre-cargar el registro general | Permite que el inspector filtre/busque "las inspecciones de mi supervisor" en AppSheet |
+| `id_servicio` | Texto | **Supervisor**, al generar el servicio (o el inspector lo selecciona de una lista filtrada) | Vincula el informe con el servicio de nuestra BD (`sheets-db` → hoja `servicios` → columna `id_servicio`). Solo aplica a técnicas que SÍ pasan por el modelo OT→Servicio (hoy: MT, PMI — 570 no, ver decisión D16bis) |
 | `fecha_inicio` | Fecha+hora | AppSheet, automático al ABRIR el formulario por primera vez | Inicio real de la captura |
 | `fecha_fin` | Fecha+hora | AppSheet, automático al pulsar el botón **Finalizado** (ver sección 3) | Fin real de la captura — de aquí sale la duración |
 | `finalizado` | Casilla (TRUE/FALSE) | AppSheet, al pulsar el botón Finalizado | Marca que el inspector considera el informe completo y listo para generar el reporte. **El botón "Generar reporte" en la webapp solo debe habilitarse si `finalizado = TRUE`** |
@@ -35,6 +37,41 @@ Una OT puede tener varias técnicas (MT + PMI), cada una con su propio inspector
 sus propios tiempos. Si el informe solo tuviera `id_ot`, no se podría saber a cuál
 de los dos servicios pertenece. `id_servicio` es siempre 1:1 con un informe (o un
 grupo de informes de la misma técnica dentro de la misma OT).
+
+---
+
+## 1bis. Patrón de búsqueda "supervisor → inspección" (estándar, todas las técnicas)
+
+Definido a partir del caso 570 (2026-07-03), pero es el patrón OFICIAL para
+cualquier técnica nueva de aquí en adelante: el inspector NO escribe el ID a mano
+ni lo busca a ciegas en una lista larga — primero busca a su supervisor, y eso
+filtra la lista de IDs disponibles.
+
+**En la hoja GENERAL/madre**, columna `nombre_supervisor`:
+
+| Propiedad | Valor |
+|---|---|
+| Type | **Enum** |
+| Base type | Text |
+| Valid_if | `SORT(UNIQUE(SELECT(<hoja_general>[nombre_supervisor], TRUE)))` (idealmente contra una tabla real de supervisores si existe) |
+| Input mode | **Search** |
+| Editable | TRUE — la llena el supervisor al crear el registro, no el inspector |
+
+**En cada hoja de sección/detalle que referencia la hoja general** (ej. las 15
+secciones de 570, o las hojas de resultados/fotos de MT/PMI), DOS columnas:
+
+1. `supervisor_filtro` (columna puente, NO se usa en el reporte, solo para filtrar):
+   - Type: **Enum**, mismo `Valid_if` que `nombre_supervisor` de la hoja general.
+   - La llena el inspector PRIMERO, antes de elegir el ID.
+2. La columna que ya referencia la hoja general (`id_informe`, `id_general`,
+   `id_api570`...):
+   - Type: **Ref** (no texto plano) → tabla = la hoja general.
+   - Input mode: **Search**.
+   - `Valid_if`: `SELECT(<hoja_general>[<id>], [nombre_supervisor] = [_THIS].[supervisor_filtro])`
+     — así solo aparecen los IDs del supervisor ya elegido.
+
+Con esto el flujo del inspector en campo es: 1) busca su supervisor → 2) busca/elige
+el ID de la inspección (nunca la OT, nunca a ciegas) → 3) llena los datos.
 
 ---
 
@@ -142,8 +179,12 @@ lógica de advertencia que los certificados ("equipo con calibración vencida").
 | Advertencia de "inspector sin certificado" al generar reporte | ✅ Hecho |
 | OT sin selección manual de supervisor/inspector | ✅ Hecho |
 | Pestaña renombrada "Inspecciones" → "Reportes" | ✅ Hecho |
-| Columnas `id_servicio`/`fecha_inicio`/`fecha_fin`/`finalizado` en los Sheets DE PRODUCCIÓN (MT, PMI) | ⏳ Pendiente — requiere autorización explícita para tocar esos Sheets |
+| Motor de reporte 570 (API 570 — Insp. Visual de Tubería), 15 secciones dinámicas + fotos | ✅ Hecho — no pasa por el modelo OT→Servicio, `ot` sigue siendo texto libre |
+| Motor de reporte 510 (API 510 — Insp. Visual de Recipientes a Presión), 11 secciones + fotos en Sheet separado | ✅ Hecho — mismo criterio que 570 (no usa OT→Servicio) |
+| Dashboard con datos reales, diferenciado por rol (admin/supervisor/inspector) | ✅ Hecho |
+| Columnas `id_servicio`/`fecha_inicio`/`fecha_fin`/`finalizado` en los Sheets DE PRODUCCIÓN (MT, PMI, 570, 510) | ⏳ Pendiente — requiere autorización explícita para tocar esos Sheets |
 | Botón "Finalizado" configurado en cada app de AppSheet | ⏳ Pendiente — se hace manualmente en la interfaz de AppSheet, ver sección 3 |
+| Patrón "supervisor → ID de inspección" (`nombre_supervisor` Enum + `supervisor_filtro` + `Ref` filtrado, sección 1bis) | ⏳ Pendiente — documentado como estándar, falta configurarlo dentro de cada app de AppSheet (570/510 primero, luego MT/PMI si aplica) |
 | Filtrado de AppSheet por `id_servicio` (Opción A o B, sección 2) | ⏳ Pendiente — depende de decidir cómo AppSheet accede a la hoja `servicios` |
 | Cálculo real de `duracion_min` con datos reales | ⏳ Pendiente — depende de que las columnas de tiempo existan en producción |
 | Equipos físicos de ensayo | ⏳ Pendiente — deprioritizado explícitamente |

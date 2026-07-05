@@ -227,6 +227,8 @@ function CertificatesModal({ user, onClose }: { user: RealUser; onClose: () => v
                         <option value="">— Selecciona —</option>
                         <option value="MT">MT — Partículas Magnéticas</option>
                         <option value="PMI">PMI — Caracterización de Materiales</option>
+                        <option value="570">API 570 — Inspección Visual de Tubería</option>
+                        <option value="510">API 510 — Inspección Visual de Recipientes a Presión</option>
                       </select>
                     </div>
                     <div className="md:col-span-2">
