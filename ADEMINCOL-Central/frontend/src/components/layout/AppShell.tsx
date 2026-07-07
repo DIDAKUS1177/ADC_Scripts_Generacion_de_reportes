@@ -62,10 +62,6 @@ export function AppShell() {
         <main className="flex-1 p-4 lg:p-8">
           <Outlet />
         </main>
-
-        <footer className="border-t border-ink-200 px-4 py-3 text-center text-xs text-ink-400">
-          Prototipo con datos simulados — sin conexión a base de datos real
-        </footer>
       </div>
     </div>
   );

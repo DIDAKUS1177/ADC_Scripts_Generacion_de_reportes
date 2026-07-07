@@ -5,17 +5,21 @@ con progreso) y administra usuarios/OTs contra la BD temporal en Sheets
 (decisión D11). NO usar en producción — no hay auth ni caché. Se reemplaza
 por el backend real de las Fases 2-4 (docs/).
 """
+import io
 import logging
 import threading
 import uuid
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import bcrypt
 from fastapi import Body, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+from .chart_durezas import ELEMENTO_DEFAULT, ELEMENTOS_DISPONIBLES, generar_grafico_durezas
 from .report_engine_mt import generar_reporte_mt
-from .report_engine_pmi import calcular_ce, generar_reporte_pmi
+from .report_engine_pmi import calcular_ce, extraer_ksis, generar_reporte_pmi
 from .report_engine_570 import SECTIONS_CONFIG as SECTIONS_CONFIG_570, generar_reporte_570
 from .report_engine_510 import SECTIONS_CONFIG as SECTIONS_CONFIG_510, generar_reporte_510
 from .sheets_client import (
@@ -41,12 +45,36 @@ app = FastAPI(title="ADEMINCOL Central — Preview API (temporal)")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5174", "http://localhost:5173"],
-    allow_methods=["GET", "POST", "PATCH"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
 # Jobs de generación en memoria: {job_id: {estado, pct, etapa, error, archivo, nombre}}
 JOBS: dict[str, dict] = {}
+
+# Pool COMPARTIDO para lecturas paralelas de Sheets (dashboard). Un pool por
+# request crearía hilos nuevos cada vez y con ellos un service de Sheets nuevo
+# por hilo (son thread-local, ver sheets_client.get_sheets_service) — al
+# reutilizar los hilos, los services y sus conexiones TLS persisten entre
+# requests y la lectura fría baja de ~9 s a lo que tarde la hoja más lenta.
+POOL_LECTURAS = ThreadPoolExecutor(max_workers=8)
+
+
+@app.on_event("startup")
+def _precalentar():
+    """Pre-calienta al arrancar, en segundo plano: crea los services de los 8
+    hilos del pool (TLS + token, ~1-2 s c/u la primera vez) y llena el caché
+    de las hojas del dashboard. Sin esto, el PRIMER usuario en abrir el
+    dashboard tras un despliegue/reinicio pagaba ~15 s de arranque en frío
+    (medido 2026-07-07); con esto, ese costo ocurre antes de que llegue."""
+    def _warmup():
+        try:
+            get_dashboard()
+            logger.info("Warmup de Sheets completado")
+        except Exception:
+            logger.warning("Warmup de Sheets falló (no crítico)")
+
+    threading.Thread(target=_warmup, daemon=True).start()
 
 
 @app.get("/health")
@@ -247,45 +275,40 @@ def _buscar_firma_usuario(nombre_inspector: str) -> str | None:
     return None
 
 
+def _generar_bytes_mt(id_informe: str, overrides: dict, progreso=None) -> tuple[bytes, str, list[str]]:
+    """Lógica pura de generación de UN reporte MT — separada del job
+    asíncrono para poder reutilizarla también en la generación por lote
+    (ver /api/preview/mt/generar-lote, decisión 2026-07-05)."""
+    fila_general, filas_resultado, indicaciones, fotos = _cargar_datos_mt(id_informe)
+
+    for campo_ui, valor in (overrides or {}).items():
+        columna = CAMPOS_EDITABLES.get(campo_ui)
+        if columna is not None and valor is not None:
+            fila_general[columna] = valor
+
+    firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
+    if firma_bd:
+        fila_general["firma_link"] = firma_bd
+
+    warnings = []
+    inspector_nombre = fila_general.get("nombre", "")
+    if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "MT"):
+        warnings.append(f"El inspector '{inspector_nombre}' no tiene un certificado de MT registrado.")
+
+    contenido = generar_reporte_mt(fila_general, filas_resultado, indicaciones, fotos, progreso=progreso)
+    return contenido, f"Reporte_MT_{id_informe}.xlsx", warnings
+
+
 def _job_generar(job_id: str, id_informe: str, overrides: dict):
     job = JOBS[job_id]
     try:
         job.update(pct=2, etapa="Leyendo datos del Sheet")
-        fila_general, filas_resultado, indicaciones, fotos = _cargar_datos_mt(id_informe)
-
-        # Aplicar los cambios que el usuario hizo en el visualizador
-        for campo_ui, valor in (overrides or {}).items():
-            columna = CAMPOS_EDITABLES.get(campo_ui)
-            if columna is not None and valor is not None:
-                fila_general[columna] = valor
-
-        # Firma: prioridad a la firma real capturada en el perfil (BD usuarios)
-        # sobre la firma_link que trae el Sheet de MT (ver decisión D8).
-        firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
-        if firma_bd:
-            fila_general["firma_link"] = firma_bd
-
-        # Advertencia (reunión 2026-07-03): avisar si el inspector que firma
-        # el informe no tiene certificado registrado para esta técnica. NO
-        # bloquea la generación — solo informa.
-        warnings = []
-        inspector_nombre = fila_general.get("nombre", "")
-        if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "MT"):
-            warnings.append(
-                f"El inspector '{inspector_nombre}' no tiene un certificado de MT registrado."
-            )
 
         def progreso(pct: int, etapa: str):
             job.update(pct=pct, etapa=etapa)
 
-        contenido = generar_reporte_mt(
-            fila_general, filas_resultado, indicaciones, fotos, progreso=progreso
-        )
-        job.update(
-            estado="DONE", pct=100, etapa="Completado",
-            archivo=contenido, nombre=f"Reporte_MT_{id_informe}.xlsx",
-            warnings=warnings,
-        )
+        contenido, nombre, warnings = _generar_bytes_mt(id_informe, overrides, progreso=progreso)
+        job.update(estado="DONE", pct=100, etapa="Completado", archivo=contenido, nombre=nombre, warnings=warnings)
     except HTTPException as e:
         job.update(estado="ERROR", error=e.detail)
     except Exception as e:
@@ -312,6 +335,7 @@ def estado_job(job_id: str):
     return {
         "estado": job["estado"], "pct": job["pct"], "etapa": job["etapa"], "error": job["error"],
         "warnings": job.get("warnings", []),
+        "detalleLote": job.get("detalleLote", []),
     }
 
 
@@ -322,9 +346,10 @@ def descargar_job(job_id: str):
         raise HTTPException(status_code=404, detail="Job no encontrado")
     if job["estado"] != "DONE" or not job["archivo"]:
         raise HTTPException(status_code=409, detail="El reporte aún no está listo")
+    media_type = job.get("mediaType") or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     return Response(
         content=job["archivo"],
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{job["nombre"]}"'},
     )
 
@@ -431,6 +456,12 @@ def get_pmi_inspection_detail(id_general: str):
         },
         "quimica": quimica,
         "durezas": durezas,
+        "elementosDisponibles": ELEMENTOS_DISPONIBLES,
+        # Decisión 2026-07-08: el gráfico automático SIEMPRE reemplaza
+        # cualquier imagen manual en link_imagen_10 — este campo ahora es
+        # solo informativo (para que la UI avise que esa imagen se va a
+        # perder), ya no cambia el comportamiento de la generación.
+        "tieneImagenManualGrafico": bool(fila_general.get("link_imagen_10", "").strip()),
         "fotos": [
             {"url": fila_general.get(campo, ""), "descripcion": campo}
             for campo in ("link_foto", "link_imagen_2", "link_imagen_3", "link_imagen_4",
@@ -440,6 +471,29 @@ def get_pmi_inspection_detail(id_general: str):
         ],
         "historialReportes": [],
     }
+
+
+@app.get("/api/preview/pmi/{id_general}/grafico-durezas")
+def previsualizar_grafico_durezas(id_general: str, elemento: str = ELEMENTO_DEFAULT):
+    """Devuelve el PNG del gráfico Tensión vs Punto para el `elemento`
+    pedido (TUBERIA, CODO, RED...) — usado por el selector de la webapp
+    para previsualizar ANTES de generar el reporte final (decisión
+    2026-07-05). No escribe nada; es puramente de lectura."""
+    try:
+        _fila_general, _quimica, durezas = _cargar_datos_pmi(id_general)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error leyendo durezas de PMI para previsualización")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer el Sheet de PMI: {e}")
+
+    grafico_bytes, _resumen_atipicos = generar_grafico_durezas(extraer_ksis(durezas), elemento.strip().upper())
+    if not grafico_bytes:
+        raise HTTPException(
+            status_code=422,
+            detail="No hay suficientes mediciones de dureza con ksi numérico para graficar (mínimo 2).",
+        )
+    return Response(content=grafico_bytes, media_type="image/png")
 
 
 def _aplicar_overrides(fila_general: dict, overrides: dict):
@@ -454,34 +508,72 @@ def _aplicar_overrides(fila_general: dict, overrides: dict):
             fila_general[columna] = valor
 
 
+def _generar_bytes_pmi(id_general: str, overrides: dict, progreso=None) -> tuple[bytes, str, list[str]]:
+    """Lógica pura de generación de UN reporte PMI — reutilizada por el job
+    individual y por la generación por lote (ver /api/preview/pmi/generar-lote)."""
+    fila_general, quimica, durezas = _cargar_datos_pmi(id_general)
+
+    _aplicar_overrides(fila_general, overrides)
+    # 'elemento_grafico' (TUBERIA/CODO/RED...) no es una columna real del
+    # Sheet — es la selección hecha en el previsualizador (ver
+    # /grafico-durezas) para el gráfico automático de la celda R202.
+    if (overrides or {}).get("elemento_grafico"):
+        fila_general["elemento_grafico"] = overrides["elemento_grafico"]
+
+    # Bloque "REVISADO POR" (P223-226, ver report_engine_pmi.py). Dos formas
+    # de llenarlo, en orden de prioridad:
+    # 1. Manual (decisión 2026-07-08 — "para un grupo de reportes"): si el
+    #    supervisor sube una firma/nombre/cargo desde el modal de generación
+    #    MASIVA, ese dato se usa TAL CUAL en todos los reportes del lote —
+    #    no se busca nada en la BD.
+    # 2. Automático (decisión 2026-07-05, generación individual): se toma
+    #    del usuario autenticado, resuelto contra la BD de usuarios.
+    overrides = overrides or {}
+    if str(overrides.get("supervisor_nombre_manual", "")).strip():
+        fila_general["supervisor_nombre"] = overrides["supervisor_nombre_manual"].strip()
+        if str(overrides.get("supervisor_cargo_manual", "")).strip():
+            fila_general["supervisor_cargo"] = overrides["supervisor_cargo_manual"].strip()
+        if str(overrides.get("supervisor_firma_manual", "")).strip():
+            fila_general["supervisor_firma_link"] = overrides["supervisor_firma_manual"].strip()
+    else:
+        supervisor_usuario = overrides.get("supervisor_usuario")
+        if supervisor_usuario:
+            try:
+                usuarios_bd = read_sheet_as_dicts(BD_SPREADSHEET_ID, "usuarios")
+                u = next(
+                    (x for x in usuarios_bd if x.get("usuario", "").strip() == supervisor_usuario.strip()),
+                    None,
+                )
+                if u:
+                    fila_general["supervisor_nombre"] = u.get("nombre")
+                    fila_general["supervisor_cargo"] = u.get("cargo")
+                    fila_general["supervisor_firma_link"] = u.get("firma") or u.get("firma_link")
+            except Exception:
+                logger.warning("No se pudo cargar datos del supervisor '%s'", supervisor_usuario)
+
+    firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
+    if firma_bd:
+        fila_general["link_firma"] = firma_bd
+
+    warnings = []
+    inspector_nombre = fila_general.get("nombre", "")
+    if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "PMI"):
+        warnings.append(f"El inspector '{inspector_nombre}' no tiene un certificado de PMI registrado.")
+
+    contenido = generar_reporte_pmi(fila_general, quimica, durezas, progreso=progreso)
+    return contenido, f"Reporte_PMI_{id_general}.xlsx", warnings
+
+
 def _job_generar_pmi(job_id: str, id_general: str, overrides: dict):
     job = JOBS[job_id]
     try:
         job.update(pct=2, etapa="Leyendo datos del Sheet")
-        fila_general, quimica, durezas = _cargar_datos_pmi(id_general)
-
-        _aplicar_overrides(fila_general, overrides)
-
-        firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
-        if firma_bd:
-            fila_general["link_firma"] = firma_bd
-
-        warnings = []
-        inspector_nombre = fila_general.get("nombre", "")
-        if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "PMI"):
-            warnings.append(
-                f"El inspector '{inspector_nombre}' no tiene un certificado de PMI registrado."
-            )
 
         def progreso(pct: int, etapa: str):
             job.update(pct=pct, etapa=etapa)
 
-        contenido = generar_reporte_pmi(fila_general, quimica, durezas, progreso=progreso)
-        job.update(
-            estado="DONE", pct=100, etapa="Completado",
-            archivo=contenido, nombre=f"Reporte_PMI_{id_general}.xlsx",
-            warnings=warnings,
-        )
+        contenido, nombre, warnings = _generar_bytes_pmi(id_general, overrides, progreso=progreso)
+        job.update(estado="DONE", pct=100, etapa="Completado", archivo=contenido, nombre=nombre, warnings=warnings)
     except HTTPException as e:
         job.update(estado="ERROR", error=e.detail)
     except Exception as e:
@@ -629,34 +721,34 @@ def get_570_inspection_detail(id_api570: str):
     }
 
 
+def _generar_bytes_570(id_api570: str, overrides: dict, progreso=None) -> tuple[bytes, str, list[str]]:
+    fila_general, secciones_data, secciones_fotos = _cargar_datos_570(id_api570)
+
+    _aplicar_overrides(fila_general, overrides)
+
+    firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
+    if firma_bd:
+        fila_general["link_firma"] = firma_bd
+
+    warnings = []
+    inspector_nombre = fila_general.get("nombre", "")
+    if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "570"):
+        warnings.append(f"El inspector '{inspector_nombre}' no tiene un certificado de API 570 registrado.")
+
+    contenido = generar_reporte_570(fila_general, secciones_data, secciones_fotos, progreso=progreso)
+    return contenido, f"Reporte_570_{id_api570}.xlsx", warnings
+
+
 def _job_generar_570(job_id: str, id_api570: str, overrides: dict):
     job = JOBS[job_id]
     try:
         job.update(pct=2, etapa="Leyendo datos del Sheet")
-        fila_general, secciones_data, secciones_fotos = _cargar_datos_570(id_api570)
-
-        _aplicar_overrides(fila_general, overrides)
-
-        firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
-        if firma_bd:
-            fila_general["link_firma"] = firma_bd
-
-        warnings = []
-        inspector_nombre = fila_general.get("nombre", "")
-        if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "570"):
-            warnings.append(
-                f"El inspector '{inspector_nombre}' no tiene un certificado de API 570 registrado."
-            )
 
         def progreso(pct: int, etapa: str):
             job.update(pct=pct, etapa=etapa)
 
-        contenido = generar_reporte_570(fila_general, secciones_data, secciones_fotos, progreso=progreso)
-        job.update(
-            estado="DONE", pct=100, etapa="Completado",
-            archivo=contenido, nombre=f"Reporte_570_{id_api570}.xlsx",
-            warnings=warnings,
-        )
+        contenido, nombre, warnings = _generar_bytes_570(id_api570, overrides, progreso=progreso)
+        job.update(estado="DONE", pct=100, etapa="Completado", archivo=contenido, nombre=nombre, warnings=warnings)
     except HTTPException as e:
         job.update(estado="ERROR", error=e.detail)
     except Exception as e:
@@ -802,34 +894,34 @@ def get_510_inspection_detail(pvid: str):
     }
 
 
+def _generar_bytes_510(pvid: str, overrides: dict, progreso=None) -> tuple[bytes, str, list[str]]:
+    fila_general, secciones_data, secciones_fotos = _cargar_datos_510(pvid)
+
+    _aplicar_overrides(fila_general, overrides)
+
+    firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
+    if firma_bd:
+        fila_general["link_firma"] = firma_bd
+
+    warnings = []
+    inspector_nombre = fila_general.get("nombre", "")
+    if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "510"):
+        warnings.append(f"El inspector '{inspector_nombre}' no tiene un certificado de API 510 registrado.")
+
+    contenido = generar_reporte_510(fila_general, secciones_data, secciones_fotos, progreso=progreso)
+    return contenido, f"Reporte_510_{pvid}.xlsx", warnings
+
+
 def _job_generar_510(job_id: str, pvid: str, overrides: dict):
     job = JOBS[job_id]
     try:
         job.update(pct=2, etapa="Leyendo datos del Sheet")
-        fila_general, secciones_data, secciones_fotos = _cargar_datos_510(pvid)
-
-        _aplicar_overrides(fila_general, overrides)
-
-        firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
-        if firma_bd:
-            fila_general["link_firma"] = firma_bd
-
-        warnings = []
-        inspector_nombre = fila_general.get("nombre", "")
-        if inspector_nombre and not _tiene_certificado_para_tecnica(inspector_nombre, "510"):
-            warnings.append(
-                f"El inspector '{inspector_nombre}' no tiene un certificado de API 510 registrado."
-            )
 
         def progreso(pct: int, etapa: str):
             job.update(pct=pct, etapa=etapa)
 
-        contenido = generar_reporte_510(fila_general, secciones_data, secciones_fotos, progreso=progreso)
-        job.update(
-            estado="DONE", pct=100, etapa="Completado",
-            archivo=contenido, nombre=f"Reporte_510_{pvid}.xlsx",
-            warnings=warnings,
-        )
+        contenido, nombre, warnings = _generar_bytes_510(pvid, overrides, progreso=progreso)
+        job.update(estado="DONE", pct=100, etapa="Completado", archivo=contenido, nombre=nombre, warnings=warnings)
     except HTTPException as e:
         job.update(estado="ERROR", error=e.detail)
     except Exception as e:
@@ -844,6 +936,90 @@ def iniciar_generacion_510(pvid: str, payload: dict = Body(default={})):
     JOBS[job_id] = {"estado": "RUNNING", "pct": 0, "etapa": "Iniciando", "error": None,
                     "archivo": None, "nombre": None, "warnings": []}
     thread = threading.Thread(target=_job_generar_510, args=(job_id, pvid, overrides), daemon=True)
+    thread.start()
+    return {"jobId": job_id}
+
+
+# =====================================================================
+# Generación MASIVA (por lote) — reunión 2026-07-05: "poder hacer reportes
+# de manera masiva". Reutiliza la lógica pura de cada tipo (_generar_bytes_*)
+# ya extraída de los jobs individuales, y empaqueta todos los .xlsx
+# generados en UN solo .zip — evita el problema de que los navegadores
+# bloqueen descargas múltiples automáticas si se intentara descargar cada
+# archivo por separado.
+# =====================================================================
+
+_GENERADORES_BYTES = {
+    "mt": _generar_bytes_mt,
+    "pmi": _generar_bytes_pmi,
+    "570": _generar_bytes_570,
+    "510": _generar_bytes_510,
+}
+
+
+def _job_generar_lote(job_id: str, tipo: str, ids: list[str], overrides: dict):
+    job = JOBS[job_id]
+    generador = _GENERADORES_BYTES[tipo]
+    total = len(ids)
+    detalle = [{"id": i, "estado": "PENDIENTE", "error": None} for i in ids]
+    job.update(detalleLote=list(detalle))
+
+    warnings_totales: list[str] = []
+    archivos: list[tuple[str, bytes]] = []
+
+    for idx, id_actual in enumerate(ids):
+        detalle[idx]["estado"] = "GENERANDO"
+        job.update(
+            pct=round(idx / total * 100),
+            etapa=f"Generando {id_actual} ({idx + 1}/{total})",
+            detalleLote=list(detalle),
+        )
+
+        def progreso(pct: int, etapa: str, _idx=idx, _id=id_actual):
+            pct_total = round(((_idx + pct / 100) / total) * 100)
+            job.update(pct=pct_total, etapa=f"{_id} ({_idx + 1}/{total}): {etapa}")
+
+        try:
+            contenido, nombre, warnings = generador(id_actual, overrides, progreso=progreso)
+            archivos.append((nombre, contenido))
+            warnings_totales.extend(warnings)
+            detalle[idx]["estado"] = "OK"
+        except HTTPException as e:
+            detalle[idx]["estado"] = "ERROR"
+            detalle[idx]["error"] = e.detail
+        except Exception as e:
+            logger.exception("Error generando %s en lote", id_actual)
+            detalle[idx]["estado"] = "ERROR"
+            detalle[idx]["error"] = str(e)
+        job.update(detalleLote=list(detalle))
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for nombre, contenido in archivos:
+            zf.writestr(nombre, contenido)
+
+    exitosos = sum(1 for d in detalle if d["estado"] == "OK")
+    nombre_zip = f"Reportes_{tipo.upper()}_lote_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    job.update(
+        estado="DONE", pct=100, etapa=f"Completado ({exitosos}/{total} exitosos)",
+        archivo=buffer.getvalue(), nombre=nombre_zip, warnings=warnings_totales,
+        mediaType="application/zip", detalleLote=list(detalle),
+    )
+
+
+@app.post("/api/preview/{tipo}/generar-lote")
+def iniciar_generacion_lote(tipo: str, payload: dict = Body(...)):
+    if tipo not in _GENERADORES_BYTES:
+        raise HTTPException(status_code=422, detail=f"Tipo de reporte inválido para lote: {tipo}")
+    ids = payload.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=422, detail="Debes indicar al menos un id para generar en lote")
+
+    overrides = payload.get("overrides", {})
+    job_id = uuid.uuid4().hex
+    JOBS[job_id] = {"estado": "RUNNING", "pct": 0, "etapa": "Iniciando lote", "error": None,
+                    "archivo": None, "nombre": None, "warnings": [], "mediaType": None, "detalleLote": []}
+    thread = threading.Thread(target=_job_generar_lote, args=(job_id, tipo, ids, overrides), daemon=True)
     thread.start()
     return {"jobId": job_id}
 
@@ -1209,6 +1385,258 @@ def crear_servicio(payload: dict = Body(...)):
 
 
 # =====================================================================
+# Equipos de ensayo (físicos) y roster de certificados de personal —
+# decisión D17 (2026-07-07). Tablas ya creadas e importadas en la BD Sheets
+# (equipos_ensayo, personal_certificados) — este es el primer cableado de
+# backend sobre ellas.
+# =====================================================================
+
+def _es_activo(valor) -> bool:
+    return str(valor or "").strip().upper() in ("TRUE", "VERDADERO", "SÍ", "SI", "1")
+
+
+@app.get("/api/preview/equipos")
+def list_equipos():
+    try:
+        rows = read_sheet_as_dicts(BD_SPREADSHEET_ID, "equipos_ensayo")
+    except Exception as e:
+        logger.exception("Error leyendo hoja equipos_ensayo")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer la BD de equipos: {e}")
+
+    out = []
+    for r in rows:
+        if not r.get("id_equipo", "").strip():
+            continue
+        out.append({
+            "idEquipo": r.get("id_equipo"),
+            "categoria": r.get("categoria") or None,
+            "equipo": r.get("equipo") or None,
+            "serie": r.get("serie") or None,
+            "serialAdc": r.get("serial_adc") or None,
+            "fechaCalibracion": r.get("fecha_calibracion") or None,
+            "fechaVencimientoCalibracion": r.get("fecha_vencimiento_calibracion") or None,
+            "activo": _es_activo(r.get("activo")),
+            "observaciones": r.get("observaciones") or None,
+        })
+    return out
+
+
+@app.post("/api/preview/equipos")
+def crear_equipo(payload: dict = Body(...)):
+    categoria = str(payload.get("categoria", "")).strip()
+    serial_adc = str(payload.get("serialAdc", "")).strip()
+    if not categoria or not serial_adc:
+        raise HTTPException(status_code=422, detail="Categoría y serial ADC son requeridos")
+
+    try:
+        existentes = read_sheet_as_dicts(BD_SPREADSHEET_ID, "equipos_ensayo")
+        n = len([r for r in existentes if r.get("id_equipo", "").strip()]) + 1
+        id_equipo = f"EQ-{n:04d}"
+        append_row(
+            BD_SPREADSHEET_ID,
+            "equipos_ensayo",
+            {
+                "id_equipo": id_equipo,
+                "categoria": categoria,
+                "equipo": str(payload.get("equipo", "")).strip() or categoria,
+                "serie": str(payload.get("serie", "")).strip(),
+                "serial_adc": serial_adc,
+                "fecha_calibracion": str(payload.get("fechaCalibracion", "")).strip(),
+                "fecha_vencimiento_calibracion": str(payload.get("fechaVencimientoCalibracion", "")).strip(),
+                "activo": "TRUE",
+                "observaciones": str(payload.get("observaciones", "")).strip(),
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error creando equipo")
+        raise HTTPException(status_code=502, detail=f"No se pudo escribir en la BD: {e}")
+    return {"ok": True, "idEquipo": id_equipo}
+
+
+_CAMPOS_EQUIPO = {
+    "categoria": "categoria", "equipo": "equipo", "serie": "serie",
+    "serialAdc": "serial_adc", "fechaCalibracion": "fecha_calibracion",
+    "fechaVencimientoCalibracion": "fecha_vencimiento_calibracion",
+    "observaciones": "observaciones",
+}
+
+
+@app.patch("/api/preview/equipos/{id_equipo}")
+def actualizar_equipo(id_equipo: str, payload: dict = Body(...)):
+    """Actualiza cualquier subconjunto de campos de un equipo — decisión
+    2026-07-08 ("estas tablas sean 100% modificables"). Reemplaza los dos
+    endpoints puntuales (/calibracion, /activo) por uno solo genérico."""
+    try:
+        encontrado = False
+        for campo_ui, columna in _CAMPOS_EQUIPO.items():
+            if campo_ui not in payload:
+                continue
+            encontrado = update_cell_by_key(
+                BD_SPREADSHEET_ID, "equipos_ensayo", "id_equipo", id_equipo,
+                columna, payload[campo_ui],
+            )
+        if "activo" in payload:
+            encontrado = update_cell_by_key(
+                BD_SPREADSHEET_ID, "equipos_ensayo", "id_equipo", id_equipo,
+                "activo", "TRUE" if payload["activo"] else "FALSE",
+            )
+    except Exception as e:
+        logger.exception("Error actualizando equipo")
+        raise HTTPException(status_code=502, detail=f"No se pudo actualizar: {e}")
+    if not encontrado:
+        raise HTTPException(status_code=404, detail=f"Equipo '{id_equipo}' no encontrado o nada que actualizar")
+    return {"ok": True}
+
+
+@app.delete("/api/preview/equipos/{id_equipo}")
+def borrar_equipo(id_equipo: str):
+    try:
+        borrados = delete_rows_by_key(BD_SPREADSHEET_ID, "equipos_ensayo", "id_equipo", id_equipo)
+    except Exception as e:
+        logger.exception("Error borrando equipo")
+        raise HTTPException(status_code=502, detail=f"No se pudo borrar: {e}")
+    if not borrados:
+        raise HTTPException(status_code=404, detail=f"Equipo '{id_equipo}' no encontrado")
+    return {"ok": True}
+
+
+def _calcular_estado_certificado(fecha_vencimiento: str) -> str | None:
+    """Recalcula VIGENTE/VENCIDA a partir de la fecha real (en vez de confiar
+    en la columna 'estado' importada, que puede quedar desactualizada).
+    Tolera los formatos mixtos que trae el Excel de origen (M/D/YYYY e
+    YYYY-MM-DD)."""
+    fecha_vencimiento = (fecha_vencimiento or "").strip()
+    if not fecha_vencimiento:
+        return None
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
+        try:
+            fecha = datetime.strptime(fecha_vencimiento, fmt)
+            return "VIGENTE" if fecha >= datetime.now() else "VENCIDA"
+        except ValueError:
+            continue
+    return None
+
+
+@app.get("/api/preview/personal-certificados")
+def list_personal_certificados(cc: str | None = None):
+    try:
+        rows = read_sheet_as_dicts(BD_SPREADSHEET_ID, "personal_certificados")
+    except Exception as e:
+        logger.exception("Error leyendo hoja personal_certificados")
+        raise HTTPException(status_code=502, detail=f"No se pudo leer la BD: {e}")
+
+    out = []
+    for r in rows:
+        if not r.get("nombre", "").strip():
+            continue
+        if cc and r.get("cc", "").strip() != cc.strip():
+            continue
+        fecha_venc = r.get("fecha_vencimiento", "").strip()
+        estado = _calcular_estado_certificado(fecha_venc) or (r.get("estado") or None)
+        out.append({
+            "idCertificado": r.get("id_certificado"),
+            "nombre": r.get("nombre"),
+            "cc": r.get("cc") or None,
+            "numeroCertificado": r.get("numero_certificado") or None,
+            "tecnica": r.get("tecnica") or None,
+            "nivel": r.get("nivel") or None,
+            "fechaEmision": r.get("fecha_emision") or None,
+            "fechaVencimiento": fecha_venc or None,
+            "estado": estado,
+        })
+    return out
+
+
+@app.post("/api/preview/personal-certificados")
+def crear_certificado_personal(payload: dict = Body(...)):
+    """Crea UNA fila de certificado directamente (decisión 2026-07-08: tabla
+    plana, libre, 100% editable — ya no hace falta crear primero una
+    "persona vacía" y cargarle certificados después). `id_certificado` es un
+    ID técnico interno, SIEMPRE único (no es el número de certificado real,
+    que puede repetirse entre las técnicas de una misma persona — bug
+    encontrado y corregido el 2026-07-08, ver migración de esa fecha)."""
+    nombre = str(payload.get("nombre", "")).strip()
+    tecnica = str(payload.get("tecnica", "")).strip()
+    if not nombre or not tecnica:
+        raise HTTPException(status_code=422, detail="Nombre y técnica son requeridos")
+    try:
+        id_certificado = uuid.uuid4().hex[:10].upper()
+        append_row(
+            BD_SPREADSHEET_ID,
+            "personal_certificados",
+            {
+                "id_certificado": id_certificado,
+                "nombre": nombre,
+                "cc": str(payload.get("cc", "")).strip(),
+                "numero_certificado": str(payload.get("numeroCertificado", "")).strip(),
+                "tecnica": tecnica,
+                "nivel": str(payload.get("nivel", "")).strip(),
+                "fecha_emision": str(payload.get("fechaEmision", "")).strip(),
+                "fecha_vencimiento": str(payload.get("fechaVencimiento", "")).strip(),
+                "estado": _calcular_estado_certificado(payload.get("fechaVencimiento", "")) or "",
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error creando certificado en roster")
+        raise HTTPException(status_code=502, detail=f"No se pudo escribir en la BD: {e}")
+    return {"ok": True, "idCertificado": id_certificado}
+
+
+_CAMPOS_CERTIFICADO_PERSONAL = {
+    "nombre": "nombre", "cc": "cc", "numeroCertificado": "numero_certificado",
+    "tecnica": "tecnica", "nivel": "nivel", "fechaEmision": "fecha_emision",
+    "fechaVencimiento": "fecha_vencimiento",
+}
+
+
+@app.patch("/api/preview/personal-certificados/certificado/{id_certificado}")
+def actualizar_certificado_personal(id_certificado: str, payload: dict = Body(...)):
+    """Actualiza cualquier subconjunto de campos de UNA fila de certificado
+    — tabla 100% editable (decisión 2026-07-08)."""
+    try:
+        encontrado = False
+        for campo_ui, columna in _CAMPOS_CERTIFICADO_PERSONAL.items():
+            if campo_ui not in payload:
+                continue
+            encontrado = update_cell_by_key(
+                BD_SPREADSHEET_ID, "personal_certificados", "id_certificado", id_certificado,
+                columna, payload[campo_ui],
+            )
+        # Si cambió la fecha de vencimiento, el estado (VIGENTE/VENCIDA) se
+        # recalcula aparte para que quede consistente en el Sheet también.
+        if "fechaVencimiento" in payload:
+            nuevo_estado = _calcular_estado_certificado(payload["fechaVencimiento"]) or ""
+            update_cell_by_key(
+                BD_SPREADSHEET_ID, "personal_certificados", "id_certificado", id_certificado,
+                "estado", nuevo_estado,
+            )
+    except Exception as e:
+        logger.exception("Error actualizando certificado personal")
+        raise HTTPException(status_code=502, detail=f"No se pudo actualizar: {e}")
+    if not encontrado:
+        raise HTTPException(status_code=404, detail=f"Certificado '{id_certificado}' no encontrado o nada que actualizar")
+    return {"ok": True}
+
+
+@app.delete("/api/preview/personal-certificados/certificado/{id_certificado}")
+def borrar_certificado_personal(id_certificado: str):
+    try:
+        borrados = delete_rows_by_key(BD_SPREADSHEET_ID, "personal_certificados", "id_certificado", id_certificado)
+    except Exception as e:
+        logger.exception("Error borrando certificado personal")
+        raise HTTPException(status_code=502, detail=f"No se pudo borrar: {e}")
+    if not borrados:
+        raise HTTPException(status_code=404, detail=f"Certificado '{id_certificado}' no encontrado")
+    return {"ok": True}
+
+
+# =====================================================================
 # Dashboard — agregados reales (reunión 2026-07-03: "mejora ese dashboard,
 # ajustado para que el administrador mire los activos, los supervisores
 # inspectores"). ADMIN ve todo el negocio (usuarios, OTs, servicios,
@@ -1231,14 +1659,34 @@ def _vencimiento_proximo(fecha_str: str, dias: int = 60) -> bool:
 
 @app.get("/api/preview/dashboard")
 def get_dashboard(usuario: str | None = None, rol: str | None = None):
+    # Las 4 hojas de la BD se leen EN PARALELO (antes eran secuenciales:
+    # ~1-2 s cada una → el dashboard tardaba 8-15 s en cargar y a veces se
+    # quedaba colgado por los errores SSL del cliente compartido — ambas
+    # cosas corregidas el 2026-07-07, ver get_sheets_service en
+    # sheets_client.py). Con el service thread-local ya es seguro.
+    # Las 8 lecturas (4 hojas de la BD + 4 hojas generales de reportes) se
+    # lanzan TODAS a la vez — el tiempo total queda en lo que tarde la hoja
+    # más lenta, no en la suma.
+    def _resumen_tipo(par):
+        tipo, fn = par
+        try:
+            items = fn()
+            generados = sum(1 for i in items if i["estadoReporte"] == "GENERADO")
+            return tipo, {"total": len(items), "generados": generados, "pendientes": len(items) - generados}
+        except Exception:
+            return tipo, {"total": 0, "generados": 0, "pendientes": 0}
+
+    hojas_bd = ["usuarios", "work_orders", "servicios", "certificados_usuarios"]
+    fuentes = (("MT", list_mt_inspections), ("PMI", list_pmi_inspections),
+               ("570", list_570_inspections), ("510", list_510_inspections))
+    futures_bd = [POOL_LECTURAS.submit(read_sheet_as_dicts, BD_SPREADSHEET_ID, h) for h in hojas_bd]
+    futures_tipos = [POOL_LECTURAS.submit(_resumen_tipo, par) for par in fuentes]
     try:
-        usuarios = read_sheet_as_dicts(BD_SPREADSHEET_ID, "usuarios")
-        ots = read_sheet_as_dicts(BD_SPREADSHEET_ID, "work_orders")
-        servicios = read_sheet_as_dicts(BD_SPREADSHEET_ID, "servicios")
-        certificados = read_sheet_as_dicts(BD_SPREADSHEET_ID, "certificados_usuarios")
+        usuarios, ots, servicios, certificados = [f.result() for f in futures_bd]
     except Exception as e:
         logger.exception("Error leyendo BD para dashboard")
         raise HTTPException(status_code=502, detail=f"No se pudo leer la BD: {e}")
+    reportesPorTipo = dict(f.result() for f in futures_tipos)
 
     ots = [r for r in ots if r.get("numero", "").strip()]
     servicios = [r for r in servicios if r.get("id_servicio", "").strip()]
@@ -1267,17 +1715,6 @@ def get_dashboard(usuario: str | None = None, rol: str | None = None):
         for c in certificados
         if _vencimiento_proximo(c.get("fecha_vencimiento", ""))
     ]
-
-    # Reportes por técnica: reutiliza los endpoints de lectura ya construidos
-    # (MT/PMI/570) — cada uno hace UNA lectura de su hoja general.
-    reportesPorTipo = {}
-    for tipo, fn in (("MT", list_mt_inspections), ("PMI", list_pmi_inspections), ("570", list_570_inspections), ("510", list_510_inspections)):
-        try:
-            items = fn()
-            generados = sum(1 for i in items if i["estadoReporte"] == "GENERADO")
-            reportesPorTipo[tipo] = {"total": len(items), "generados": generados, "pendientes": len(items) - generados}
-        except Exception:
-            reportesPorTipo[tipo] = {"total": 0, "generados": 0, "pendientes": 0}
 
     data = {
         "usuariosActivos": len(usuarios_activos),

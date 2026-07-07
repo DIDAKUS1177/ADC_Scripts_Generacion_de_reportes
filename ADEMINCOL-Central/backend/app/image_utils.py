@@ -20,6 +20,25 @@ from openpyxl.utils.units import pixels_to_EMU
 logger = logging.getLogger("image_utils")
 
 
+def desactivar_fit_to_page(ws):
+    """REVERTIDO el 2026-07-08 — ya NO hace nada (se deja como no-op en vez
+    de borrarla para no tener que tocar los 3 motores que la llaman).
+
+    Historia: el 2026-07-06 diagnostiqué que `fitToPage=True` (que traen
+    PMI/570/510, no MT) hacía que las imágenes flotantes se vieran
+    desbordadas al exportar a PDF, y esta función lo desactivaba. Esa
+    prueba se hizo con LibreOffice --headless (no había Excel real a mano).
+    El 2026-07-08 el usuario reportó, probando en Excel de verdad, que con
+    `fitToPage=False` el reporte PMI paginaba a **126 páginas** al imprimir
+    (Ctrl+P) — la plantilla es MUY ancha (34 columnas) y alta (895 filas), y
+    sin ese ajuste Excel no comprime nada. Osea: el bug de imágenes
+    desbordadas era un artefacto del renderizador de LibreOffice, no de
+    Excel real — la plantilla siempre estuvo pensada para imprimirse con
+    `fitToPage=True` (así la dejó quien la diseñó) y ESO es lo correcto en
+    Excel. Se revierte a no tocar el valor de la plantilla."""
+    return
+
+
 def drive_url_a_descarga(url: str) -> str | None:
     if not url:
         return None
@@ -75,10 +94,20 @@ def insertar_imagen_centrada(ws, image_bytes: bytes, celda_ancla: str):
             break
 
     min_col, min_row, max_col, max_row = destino
+    # Conversión ancho de columna (unidades de caracter, fuente Calibri 11,
+    # MDW=7) -> píxeles. FORMULA CORREGIDA 2026-07-05: usaba solo `width * 7`,
+    # que subestima el ancho real por ~5px POR COLUMNA (el ancho default de
+    # Excel, 8.43, da 64px documentados — la fórmula vieja daba 59px). En un
+    # merge de muchas columnas (ej. el bloque de fotos de 570/510, 22
+    # columnas) el déficit acumulado superaba 100px, y como la imagen se
+    # escalaba para caber en esa área SUBESTIMADA, quedaba más pequeña de lo
+    # que debía y desplazada hacia la izquierda dentro de la celda real —
+    # visualmente "no centrada" y con la columna viéndose más ancha que la
+    # imagen.
     ancho_area = sum(
-        (ws.column_dimensions[get_column_letter(c)].width or 8.43)
+        (ws.column_dimensions[get_column_letter(c)].width or 8.43) * 7 + 5
         for c in range(min_col, max_col + 1)
-    ) * 7
+    )
     alto_area = sum(
         (ws.row_dimensions[r].height or 15) for r in range(min_row, max_row + 1)
     ) * 96 / 72

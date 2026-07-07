@@ -72,15 +72,34 @@ TABLA_ELEMENTOS = [
     ("PULMON", "A516 Gr. 60", 52, 80, "#395882"),
 ]
 
+# Lista de tipos de elemento disponibles para el selector de la webapp —
+# orden estable, con TUBERIA primero por ser el default.
+ELEMENTOS_DISPONIBLES = [ELEMENTO_DEFAULT] + sorted(
+    {e for e, *_ in TABLA_ELEMENTOS if e != ELEMENTO_DEFAULT}
+)
 
-def generar_grafico_durezas(valores_ksi: list[float], elemento: str = ELEMENTO_DEFAULT) -> bytes | None:
-    """Genera el PNG (bytes) del gráfico Tensión vs Punto. Devuelve None si
-    no hay al menos 2 valores numéricos (no se puede calcular Q1/Q3)."""
+
+def _formatear_atipicos(puntos_valores: list[tuple[int, float]]) -> str:
+    if not puntos_valores:
+        return "Ninguno"
+    return ", ".join(f"P{p} ({v:.2f})" for p, v in puntos_valores)
+
+
+def generar_grafico_durezas(
+    valores_ksi: list[float], elemento: str = ELEMENTO_DEFAULT
+) -> tuple[bytes | None, str]:
+    """Genera el PNG (bytes) del gráfico Tensión vs Punto y el texto-resumen
+    de puntos atípicos (para la celda B223, ver report_engine_pmi.py).
+    Devuelve (None, "") si no hay al menos 2 valores numéricos (no se puede
+    calcular Q1/Q3).
+
+    Decisión 2026-07-08: los puntos fuera de [Lim. Inf., Lim. Sup.] (regla de
+    Tukey/IQR, calculada sobre TODOS los valores) se QUITAN del gráfico —
+    quedan listados en el texto-resumen en vez de dibujados como punto."""
     valores = [v for v in valores_ksi if v is not None]
     if len(valores) < 2:
-        return None
+        return None, ""
 
-    puntos = list(range(1, len(valores) + 1))
     arr = np.array(valores, dtype=float)
     # numpy.percentile con interpolación 'linear' (default) coincide con el
     # type=7 de quantile() en R (también el default de R).
@@ -88,6 +107,21 @@ def generar_grafico_durezas(valores_ksi: list[float], elemento: str = ELEMENTO_D
     iqr = q3 - q1
     lim_inf = q1 - 1.5 * iqr
     lim_sup = q3 + 1.5 * iqr
+
+    # Numeración de "Punto" en el orden ORIGINAL de las durezas (1-based) —
+    # los atípicos se quitan del gráfico pero conservan su número original,
+    # para que el texto de B223 ("P5...") coincida con la posición real del
+    # dato en el Sheet, no con una renumeración.
+    atipicos_arriba = [(i + 1, v) for i, v in enumerate(valores) if v > lim_sup]
+    atipicos_abajo = [(i + 1, v) for i, v in enumerate(valores) if v < lim_inf]
+    puntos_validos = [(i + 1, v) for i, v in enumerate(valores) if lim_inf <= v <= lim_sup]
+    resumen_atipicos = (
+        f"Puntos atípicos — Por encima del límite superior: {_formatear_atipicos(atipicos_arriba)}. "
+        f"Por debajo del límite inferior: {_formatear_atipicos(atipicos_abajo)}."
+    )
+
+    puntos = [p for p, _v in puntos_validos]
+    valores_grafico = [v for _p, v in puntos_validos]
 
     # distinct(MATERIAL, TENSION, COLOR) del material del elemento pedido,
     # igual que `lineas_materiales` en el script R.
@@ -121,10 +155,13 @@ def generar_grafico_durezas(valores_ksi: list[float], elemento: str = ELEMENTO_D
     offsets = [y_final[i] - materiales[i][1] for i in range(len(materiales))]
 
     fig, ax = plt.subplots(figsize=(11, 5.2), dpi=150)
-    ax.scatter(puntos, valores, color="#f8996d", s=30, zorder=3)
+    ax.scatter(puntos, valores_grafico, color="#f8996d", s=30, zorder=3)
 
-    x_izq = -max(2.0, len(puntos) * 0.18)
-    ax.set_xlim(x_izq, len(puntos) + 0.6)
+    # El eje X usa el total ORIGINAL de puntos (no solo los válidos) para que
+    # la numeración de "Punto" no se vea truncada cuando se quitan atípicos.
+    total_original = len(valores)
+    x_izq = -max(2.0, total_original * 0.18)
+    ax.set_xlim(x_izq, total_original + 0.6)
     x_etiqueta = x_izq + 0.15
 
     ax.axhline(lim_inf, color="red", linewidth=1.3, zorder=2)
@@ -153,4 +190,4 @@ def generar_grafico_durezas(valores_ksi: list[float], elemento: str = ELEMENTO_D
         fig.savefig(buffer, format="png", facecolor="white")
     finally:
         plt.close(fig)
-    return buffer.getvalue()
+    return buffer.getvalue(), resumen_atipicos

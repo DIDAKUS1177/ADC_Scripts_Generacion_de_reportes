@@ -206,6 +206,65 @@ paso a paso de AppSheet):
     de AppSheet, no por API) — el usuario eligió que se documente el paso a paso en
     vez de que se intente automatizar.
 
+### D17. Equipos, roster de certificados y consecutivo global de reportes (2026-07-07)
+A partir de `PERSONAL_EQUIPO_CONSEC.xlsx` (equipos físicos, roster de personal con
+certificados, y el histórico de consecutivos de reporte), se agregaron 3 tablas nuevas
+a la BD Sheets, siguiendo el mismo patrón de D11 (Sheets temporal, columnas iguales a
+como vivirán en Postgres). Ya creadas y con los datos reales importados
+(2026-07-07, vía Python + service account, mismo mecanismo que la migración de
+`servicios`/`tecnica` del 2026-07-03 — no requirió pasos manuales en Sheets).
+
+**`equipos_ensayo`** — resuelve el pendiente de D12/D16 ("equipos lo dejamos de
+pendiente"). Inventario de equipos FÍSICOS (durómetros, gausímetros, cámaras
+termográficas, equipos PAUT/MX2/GWT/PCM/CMAT/ACFM/PT...). 64 equipos importados.
+- `serial_adc` es la ÚNICA columna que debe seleccionar el inspector en AppSheet (no la
+  serie de fábrica) — consistente con lo pedido en la reunión original.
+- A diferencia del Excel de origen (una columna de fecha de calibración POR AÑO —
+  obliga a agregar una columna nueva cada año), aquí hay solo DOS columnas fijas:
+  `fecha_calibracion` (última) y `fecha_vencimiento_calibracion` (próxima). El
+  supervisor actualiza estas DOS celdas cuando el equipo se recalibra — no hace falta
+  rediseñar la tabla cada año. **Pendiente de construir**: la pantalla/endpoint para
+  que el supervisor edite estas fechas desde la webapp (hoy solo existe el dato
+  importado; falta la UI de edición y la advertencia de "equipo con calibración
+  vencida", mencionada en la reunión original junto con la de certificados).
+
+**`personal_certificados`** — roster MAESTRO de certificados de TODO el personal de
+ADEMINCOL (65 personas, 251 certificados, 29 técnicas), no solo de quienes ya tienen
+usuario en la webapp. Se identifica por `cc` (cédula), no por `usuario` (login) —
+es un concepto distinto y más amplio que `certificados_usuarios` (D-nota original):
+- `certificados_usuarios` sigue existiendo tal cual, para certificados de usuarios YA
+  REGISTRADOS en la plataforma (vinculados por login) — es lo que usa hoy
+  `_tiene_certificado_para_tecnica()` para la advertencia al generar reportes.
+- `personal_certificados` es la fuente real de verdad de RRHH — incluye técnicas que
+  todavía no tienen reporte automatizado en la webapp (API 653, CWI, TOFD, etc., ver
+  `TECNICAS_PERSONAL_VALIDAS` en `CrearHojasBD.gs`, más amplia que `TECNICAS_VALIDAS`).
+- **Camino natural a futuro** (no hecho todavía): que la advertencia de "inspector sin
+  certificado" busque primero en `personal_certificados` (por nombre/cc, mismo match
+  tolerante que `_buscar_firma_usuario`) en vez de únicamente en `certificados_usuarios`
+  — así no habría que dar de alta manualmente en la webapp a alguien que ya está en el
+  roster de RRHH para que la advertencia funcione.
+
+**`consecutivos_reportes`** — contador GLOBAL de números de reporte. `secuencia` es el
+entero autoincremental real; `consecutivo` es el texto ya usado en producción por
+ADEMINCOL: `R-ADC-{secuencia}-{TECNICA}-{ABV_CLIENTE}-{INICIALES_RESPONSABLE}`
+(ej. `R-ADC-22-MT-CENIT-DH`). 21 consecutivos históricos importados (secuencia 1-21).
+- **Objetivo** (pendiente de construir en el backend): que los campos "Reporte N" /
+  `reporte_n` (MT) / `n_reporte` (PMI) / `consecutivo` (570, 510) dejen de escribirse a
+  mano en AppSheet y en su lugar el backend calcule
+  `MAX(secuencia) + 1` sobre esta tabla al generar el reporte, arme el string con el
+  mismo patrón, y agregue una fila nueva aquí — un único consecutivo para TODA la
+  empresa sin importar la técnica, igual que ya se hace manualmente hoy.
+
+**Alcance de esta fase:** solo se crearon las tablas y se importaron los datos reales.
+Faltan 3 piezas de backend/frontend para que esto se sienta terminado (no pedidas
+explícitamente en este mensaje, quedan para la siguiente iteración):
+1. Endpoint + UI para que el supervisor actualice `fecha_calibracion`/
+   `fecha_vencimiento_calibracion` de un equipo desde `/equipos`.
+2. Advertencia de "equipo con calibración vencida" al generar un reporte (mismo patrón
+   que la de certificado, usando `equipos_ensayo`).
+3. Generación automática del consecutivo (`consecutivos_reportes`) en vez de que el
+   inspector lo escriba a mano en el Sheet de cada técnica.
+
 ---
 
 ## 2. Diagrama de componentes

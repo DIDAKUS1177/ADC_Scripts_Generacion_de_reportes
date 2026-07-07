@@ -40,6 +40,9 @@ const HOJA_USUARIOS = 'usuarios';
 const HOJA_WORK_ORDERS = 'work_orders';
 const HOJA_CERTIFICADOS = 'certificados_usuarios';
 const HOJA_SERVICIOS = 'servicios';
+const HOJA_EQUIPOS = 'equipos_ensayo';
+const HOJA_PERSONAL_CERTIFICADOS = 'personal_certificados';
+const HOJA_CONSECUTIVOS = 'consecutivos_reportes';
 
 // Columnas idénticas a docs/01_BASE_DE_DATOS.md — CREATE TABLE users / work_orders
 const COLUMNAS_USUARIOS = [
@@ -116,6 +119,99 @@ const COLUMNAS_SERVICIOS = [
   'created_at',
 ];
 
+// Nueva tabla (2026-07-07) — importada desde PERSONAL_EQUIPO_CONSEC.xlsx.
+// Inventario de equipos FÍSICOS de ensayo (durómetros, gausímetros,
+// equipos PAUT, cámaras termográficas, etc.), pendiente desde la reunión
+// del 2026-07-03 ("respecto a equipos es importante que lo dejemos de
+// pendiente" — ver decisión D12 y sección 5 de ESTANDAR_COLUMNAS_APPSHEET.md,
+// ahora sí se construye). El inspector en AppSheet solo debe seleccionar
+// `serial_adc` (el identificador interno), nunca la serie de fábrica.
+// A diferencia del Excel original (una columna de fecha de calibración POR
+// AÑO — 2024/2025/2026 — que obliga a agregar una columna nueva cada año),
+// aquí se usan DOS columnas fijas que se van actualizando: la última
+// calibración hecha y su vencimiento. Así el supervisor solo necesita
+// "actualizar la fecha" cuando recalibra, no agregar columnas cada año.
+const COLUMNAS_EQUIPOS = [
+  'id_equipo',                      // texto único, ej. "EQ-0001"
+  'categoria',                      // tipo de equipo (ver CATEGORIAS_EQUIPO_VALIDAS)
+  'equipo',                         // nombre/modelo comercial, ej. "MX2", "PAUT VEO3"
+  'serie',                          // número de serie de fábrica
+  'serial_adc',                     // identificador interno ADC — ÚNICO dato que
+                                     // selecciona el inspector en AppSheet, ej. "ADC131"
+  'fecha_calibracion',              // última calibración realizada
+  'fecha_vencimiento_calibracion',  // próxima calibración / vencimiento
+  'activo',                         // TRUE/FALSE
+  'observaciones',
+  'created_at',
+];
+
+// Nueva tabla (2026-07-07) — roster MAESTRO de certificados de TODO el
+// personal de ADEMINCOL (65 personas, 251 certificados, 29 técnicas en el
+// Excel de origen), NO solo de quienes ya tienen usuario en la webapp.
+// Se identifica por `cc` (cédula), no por `usuario` (login) — a
+// diferencia de `certificados_usuarios`, que sigue existiendo para los
+// certificados de usuarios YA REGISTRADOS en la plataforma (vinculados por
+// login). Esta tabla es la fuente real de verdad de RRHH/certificaciones;
+// `certificados_usuarios` puede eventualmente poblarse buscando aquí por
+// nombre/cc con el mismo match tolerante que ya usa el backend
+// (_buscar_firma_usuario / _tiene_certificado_para_tecnica en main.py) —
+// ver docs/00_ARQUITECTURA.md decisión D17.
+const COLUMNAS_PERSONAL_CERTIFICADOS = [
+  'id_certificado',       // texto único — se usa el # certificado real si existe
+  'nombre',
+  'cc',                   // cédula — identifica a la persona (se repite entre filas)
+  'numero_certificado',   // # certificado tal cual (puede repetirse entre personas)
+  'tecnica',              // ver TECNICAS_PERSONAL_VALIDAS (lista amplia, no solo
+                           // las técnicas con reporte ya construido en la webapp)
+  'nivel',                // I | II | III (opcional)
+  'fecha_emision',
+  'fecha_vencimiento',
+  'estado',               // VIGENTE | VENCIDA — se recalcula en el backend a partir
+                           // de fecha_vencimiento; se guarda aquí solo para la
+                           // importación inicial desde el Excel de origen
+  'created_at',
+];
+
+// Nueva tabla (2026-07-07) — consecutivo GLOBAL de números de reporte, para
+// que los campos "Reporte N" / "N_Reporte" / "consecutivo" que ya existen en
+// MT, PMI, 570 y 510 salgan de una sola fuente (en vez de que cada inspector
+// escriba lo que quiera). `secuencia` es el contador real (autoincremental);
+// `consecutivo` es el texto final con el mismo patrón que ya usa ADEMINCOL:
+// "R-ADC-{secuencia}-{TECNICA}-{ABV_CLIENTE}-{INICIALES_RESPONSABLE}".
+const COLUMNAS_CONSECUTIVOS = [
+  'secuencia',                // número entero autoincremental — LA CLAVE real
+  'consecutivo',              // texto generado, ej. "R-ADC-22-MT-CENIT-DH"
+  'tecnica',
+  'cliente',
+  'abv_cliente',              // abreviatura corta del cliente (para el consecutivo)
+  'alcance',                  // descripción del alcance (línea, equipo, etc.)
+  'abv_alcance',
+  'fecha_ejecucion',
+  'fecha_entrega_reporte',
+  'dias',                     // días entre ejecución y entrega (informativo)
+  'responsable',
+  'iniciales_responsable',    // ej. "DH" — se usan en el consecutivo
+  'comentarios',
+  'created_at',
+];
+
+const CATEGORIAS_EQUIPO_VALIDAS = [
+  'Espesores', 'NOVOTEST', 'Crawler', 'PAUT_SCANC', 'PAUT VEO3', 'MX2',
+  'REDDY-32', 'PCM', 'GWT', 'PINTURA', 'CMAT', 'MT', 'ACFM', 'PT',
+];
+
+// Lista amplia de técnicas de CERTIFICACIÓN de personal — NO confundir con
+// TECNICAS_VALIDAS (las técnicas con motor de reporte ya construido en la
+// webapp). Una persona puede estar certificada en técnicas que todavía no
+// tienen reporte automatizado (ej. API 653, CWI, TOFD).
+const TECNICAS_PERSONAL_VALIDAS = [
+  'ACFM', 'ACOSEND', 'API 510', 'API 570', 'API 580', 'API 653', 'CIP',
+  'CP1', 'CP2', 'CWI', 'DRONE', 'ECA', 'ET', 'GWT', 'LEAK TESTING PH',
+  'MFL', 'MT', 'PAUT', 'PT', 'RHINO', 'SCWI', 'TERMOGRAFIA', 'TFM',
+  'TOFD', 'UT', 'UT-ME', 'UTPA', 'VT', 'X7',
+];
+const ESTADOS_CERTIFICADO_VALIDOS = ['VIGENTE', 'VENCIDA'];
+
 const ROLES_VALIDOS = ['ADMINISTRADOR', 'SUPERVISOR', 'INSPECTOR'];
 const ESTADOS_OT_VALIDOS = ['PENDIENTE', 'EN_CURSO', 'COMPLETADA', 'CANCELADA'];
 // Técnicas soportadas — deben coincidir con report_types del backend
@@ -144,12 +240,28 @@ function crearEstructuraBD() {
   _aplicarValidacionLista(hojaServicios, 'tecnica', COLUMNAS_SERVICIOS, TECNICAS_VALIDAS);
   _aplicarValidacionLista(hojaServicios, 'estado', COLUMNAS_SERVICIOS, ESTADOS_OT_VALIDOS);
 
+  const hojaEquipos = _crearOReusarHoja(ss, HOJA_EQUIPOS, COLUMNAS_EQUIPOS);
+  _aplicarValidacionLista(hojaEquipos, 'categoria', COLUMNAS_EQUIPOS, CATEGORIAS_EQUIPO_VALIDAS);
+  _aplicarValidacionCasilla(hojaEquipos, 'activo', COLUMNAS_EQUIPOS);
+
+  const hojaPersonalCert = _crearOReusarHoja(ss, HOJA_PERSONAL_CERTIFICADOS, COLUMNAS_PERSONAL_CERTIFICADOS);
+  _aplicarValidacionLista(hojaPersonalCert, 'tecnica', COLUMNAS_PERSONAL_CERTIFICADOS, TECNICAS_PERSONAL_VALIDAS);
+  _aplicarValidacionLista(hojaPersonalCert, 'estado', COLUMNAS_PERSONAL_CERTIFICADOS, ESTADOS_CERTIFICADO_VALIDOS);
+
+  const hojaConsecutivos = _crearOReusarHoja(ss, HOJA_CONSECUTIVOS, COLUMNAS_CONSECUTIVOS);
+  _aplicarValidacionLista(hojaConsecutivos, 'tecnica', COLUMNAS_CONSECUTIVOS, TECNICAS_PERSONAL_VALIDAS);
+
   SpreadsheetApp.getUi().alert(
     '✅ Estructura lista',
-    'Hojas "usuarios", "work_orders", "certificados_usuarios" y "servicios" ' +
+    'Hojas "usuarios", "work_orders", "certificados_usuarios", "servicios", ' +
+      '"equipos_ensayo", "personal_certificados" y "consecutivos_reportes" ' +
       'creadas/verificadas.\n\n' +
       'Siguiente paso: conectar este Sheet a AppSheet y configurar la ' +
-      'columna "firma" como tipo Signature.',
+      'columna "firma" como tipo Signature.\n\n' +
+      'Los datos de PERSONAL_EQUIPO_CONSEC.xlsx (equipos, personal, ' +
+      'consecutivos) se importan aparte, directo vía Python con el service ' +
+      'account (mismo mecanismo que la migración de "servicios" del ' +
+      '2026-07-03) — no hace falta ningún paso manual en Sheets.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
 }

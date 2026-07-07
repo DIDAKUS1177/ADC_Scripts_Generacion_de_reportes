@@ -96,6 +96,8 @@ export interface PmiPreviewDetail extends PmiPreviewItem {
   quimica: PmiPreviewQuimica[];
   durezas: PmiPreviewDureza[];
   fotos: MtPreviewFoto[];
+  elementosDisponibles: string[];
+  tieneImagenManualGrafico: boolean;
 }
 
 export async function fetchRealPmiInspections(): Promise<PmiPreviewItem[]> {
@@ -114,6 +116,16 @@ export async function fetchRealPmiInspectionDetail(idGeneral: string): Promise<P
     throw new PreviewApiError("No se pudo cargar el detalle real de esta caracterización.");
   }
   return res.json();
+}
+
+// El gráfico Tensión vs Punto (durezas) — antes se generaba corriendo un
+// script en R y subiendo el PNG a mano. Este endpoint devuelve el PNG
+// generado en el momento para el `elemento` elegido (TUBERIA por defecto),
+// puramente de lectura — se usa solo para previsualizar (ver decisión
+// 2026-07-05). El endpoint devuelve la imagen directamente, así que basta
+// con usar la URL como `src` de un <img>.
+export function pmiGraficoDurezasUrl(idGeneral: string, elemento: string): string {
+  return `${PREVIEW_API_BASE}/api/preview/pmi/${encodeURIComponent(idGeneral)}/grafico-durezas?elemento=${encodeURIComponent(elemento)}`;
 }
 
 // ---- API 570: Inspección Visual de Tubería ----
@@ -217,12 +229,19 @@ async function leerDetalleError(res: Response, fallback: string): Promise<string
 
 // ---- Generación asíncrona con progreso ----
 
+export interface BatchDetalleItem {
+  id: string;
+  estado: "PENDIENTE" | "GENERANDO" | "OK" | "ERROR";
+  error: string | null;
+}
+
 export interface JobStatus {
   estado: "RUNNING" | "DONE" | "ERROR";
   pct: number;
   etapa: string;
   error: string | null;
   warnings: string[];
+  detalleLote: BatchDetalleItem[];
 }
 
 export type ReportKind = "mt" | "pmi" | "570" | "510";
@@ -263,6 +282,44 @@ export async function downloadJobResult(
   const a = document.createElement("a");
   a.href = url;
   a.download = `Reporte_${tipo.toUpperCase()}_${idInforme}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ---- Generación MASIVA (por lote) — reunión 2026-07-05 ----
+// Empaqueta todos los reportes seleccionados en un único .zip (evita que el
+// navegador bloquee descargas múltiples automáticas).
+
+export async function startBatchReportJob(
+  tipo: ReportKind,
+  ids: string[],
+  overrides: Record<string, string> = {}
+): Promise<string> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/${tipo}/generar-lote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, overrides }),
+  });
+  if (!res.ok) {
+    throw new PreviewApiError(await leerDetalleError(res, "No se pudo iniciar la generación por lote."));
+  }
+  const body = await res.json();
+  return body.jobId;
+}
+
+export async function downloadBatchResult(jobId: string): Promise<void> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/jobs/${jobId}/descargar`);
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo descargar el lote."));
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const nombre = match ? match[1] : `Reportes_lote_${Date.now()}.zip`;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -491,4 +548,130 @@ export async function fetchRealDashboard(usuario: string, rol: string): Promise<
   );
   if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo cargar el dashboard."));
   return res.json();
+}
+
+// ---- Equipos de ensayo (físicos) — decisión D17 (2026-07-07) ----
+
+export interface RealEquipo {
+  idEquipo: string;
+  categoria: string | null;
+  equipo: string | null;
+  serie: string | null;
+  serialAdc: string | null;
+  fechaCalibracion: string | null;
+  fechaVencimientoCalibracion: string | null;
+  activo: boolean;
+  observaciones: string | null;
+}
+
+export interface NewEquipoPayload {
+  categoria: string;
+  equipo?: string;
+  serie?: string;
+  serialAdc: string;
+  fechaCalibracion?: string;
+  fechaVencimientoCalibracion?: string;
+  observaciones?: string;
+}
+
+export async function fetchRealEquipos(): Promise<RealEquipo[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/equipos`);
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo leer la BD de equipos."));
+  return res.json();
+}
+
+export async function crearEquipo(payload: NewEquipoPayload): Promise<{ idEquipo: string }> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/equipos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo crear el equipo."));
+  return res.json();
+}
+
+// Tabla 100% editable (decisión 2026-07-08): actualiza cualquier
+// subconjunto de campos de un equipo en una sola llamada.
+export async function actualizarEquipo(idEquipo: string, cambios: Partial<Omit<RealEquipo, "idEquipo">>): Promise<void> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/equipos/${encodeURIComponent(idEquipo)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(cambios),
+  });
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo actualizar el equipo."));
+}
+
+export async function borrarEquipo(idEquipo: string): Promise<void> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/equipos/${encodeURIComponent(idEquipo)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo borrar el equipo."));
+}
+
+// ---- Roster de certificados de personal (RRHH) — decisión D17 (2026-07-07),
+// tabla plana 100% editable (decisión 2026-07-08). Distinto de
+// UserCertificate/certificados_usuarios: este roster cubre a TODO el
+// personal de ADEMINCOL identificado por cédula (`cc`), tenga o no usuario
+// en la webapp, y la técnica es texto LIBRE (29+ técnicas reales, no solo
+// las 4 con reporte automatizado).
+
+export interface PersonalCertificado {
+  idCertificado: string;
+  nombre: string;
+  cc: string | null;
+  numeroCertificado: string | null;
+  tecnica: string | null;
+  nivel: string | null;
+  fechaEmision: string | null;
+  fechaVencimiento: string | null;
+  estado: string | null;
+}
+
+export interface NewPersonalCertificadoPayload {
+  nombre: string;
+  cc?: string;
+  numeroCertificado?: string;
+  tecnica: string;
+  nivel?: string;
+  fechaEmision?: string;
+  fechaVencimiento?: string;
+}
+
+export async function fetchPersonalCertificados(): Promise<PersonalCertificado[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/personal-certificados`);
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo leer el roster de certificados."));
+  return res.json();
+}
+
+export async function crearCertificadoPersonal(payload: NewPersonalCertificadoPayload): Promise<{ idCertificado: string }> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/personal-certificados`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo crear el certificado."));
+  return res.json();
+}
+
+export async function actualizarCertificadoPersonal(
+  idCertificado: string,
+  cambios: Partial<Omit<PersonalCertificado, "idCertificado" | "estado">>
+): Promise<void> {
+  const res = await fetch(
+    `${PREVIEW_API_BASE}/api/preview/personal-certificados/certificado/${encodeURIComponent(idCertificado)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cambios),
+    }
+  );
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo actualizar el certificado."));
+}
+
+export async function borrarCertificadoPersonal(idCertificado: string): Promise<void> {
+  const res = await fetch(
+    `${PREVIEW_API_BASE}/api/preview/personal-certificados/certificado/${encodeURIComponent(idCertificado)}`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo borrar el certificado."));
 }

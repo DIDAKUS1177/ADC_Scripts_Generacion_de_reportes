@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, ImageIcon, PencilLine } from "lucide-react";
+import { Download, Eye, ImageIcon, Layers, PencilLine } from "lucide-react";
 import {
   downloadJobResult,
   fetchReal570InspectionDetail,
@@ -13,6 +13,8 @@ import {
 import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
 import { useToast } from "../ui/Toast";
+import { useBatchGeneration } from "./useBatchGeneration";
+import { BatchGenerationStatus } from "./BatchGenerationStatus";
 
 // Panel de datos REALES de API 570 (Inspección Visual de Tubería). A
 // diferencia de MT/PMI, el reporte tiene 15 secciones independientes con
@@ -31,6 +33,7 @@ export function Real570InspectionsPanel() {
   const [job, setJob] = useState<{ pct: number; etapa: string } | null>(null);
   const pollRef = useRef<number | null>(null);
   const [query, setQuery] = useState("");
+  const batchGen = useBatchGeneration("570");
 
   const filtered = useMemo(() => {
     if (!items) return null;
@@ -122,10 +125,41 @@ export function Real570InspectionsPanel() {
             className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
           />
         </div>
+        {batchGen.selected.size > 0 && (
+          <div className="flex items-center justify-between gap-2 border-b border-brand-100 bg-brand-50 px-3 py-2">
+            <span className="text-xs font-medium text-brand-700">{batchGen.selected.size} seleccionados</span>
+            <button
+              onClick={() => batchGen.startBatch()}
+              disabled={!!batchGen.batch?.corriendo}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
+            >
+              <Layers size={13} /> Generar seleccionados (.zip)
+            </button>
+          </div>
+        )}
+        {batchGen.batch && (
+          <div className="border-b border-ink-100 p-3">
+            <BatchGenerationStatus
+              detalle={batchGen.batch.detalle}
+              pct={batchGen.batch.pct}
+              etapa={batchGen.batch.etapa}
+              corriendo={batchGen.batch.corriendo}
+              onClose={batchGen.closeBatch}
+            />
+          </div>
+        )}
         <div className="overflow-auto">
           <table className="w-full text-sm">
             <thead className="sticky top-0 z-10 bg-ink-50 text-left text-xs font-semibold uppercase text-ink-500 shadow-sm">
               <tr>
+                <th className="w-9 px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={!!filtered?.length && filtered.every((it) => batchGen.selected.has(it.idInforme))}
+                    onChange={() => batchGen.toggleSelectAll(filtered?.map((it) => it.idInforme) ?? [])}
+                    className="h-3.5 w-3.5 accent-brand-600"
+                  />
+                </th>
                 <th className="px-4 py-2.5">ID Informe</th>
                 <th className="px-4 py-2.5">Cliente</th>
                 <th className="px-4 py-2.5">Fecha</th>
@@ -143,6 +177,14 @@ export function Real570InspectionsPanel() {
                   }`}
                   onClick={() => openDetail(it.idInforme)}
                 >
+                  <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={batchGen.selected.has(it.idInforme)}
+                      onChange={() => batchGen.toggleSelect(it.idInforme)}
+                      className="h-3.5 w-3.5 accent-brand-600"
+                    />
+                  </td>
                   <td className="px-4 py-2.5 font-mono text-xs text-ink-800">{it.idInforme}</td>
                   <td className="max-w-[120px] truncate px-4 py-2.5 text-ink-600" title={it.cliente ?? ""}>
                     {it.cliente ?? "-"}

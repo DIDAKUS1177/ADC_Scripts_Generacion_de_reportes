@@ -5,6 +5,8 @@ lectura/escritura de la BD temporal de usuarios/OTs (ver
 sheets-db/CrearHojasBD.gs y decisión D11 en docs/00_ARQUITECTURA.md).
 El SheetsClient robusto de la Fase 3 (retries, backoff) reemplaza esto.
 """
+import threading
+import time
 from pathlib import Path
 
 from google.oauth2 import service_account
@@ -51,23 +53,69 @@ HOJA_510_GENERAL = "0.pv_general"
 # BD temporal usuarios/work_orders creada con sheets-db/CrearHojasBD.gs
 BD_SPREADSHEET_ID = "1HVGz6v06ML1Ohg3z6n8HS_97etWChev7fkwDgEPOIMo"
 
-_service = None
+# El service de googleapiclient usa httplib2 por debajo, que NO es
+# thread-safe: cuando dos hilos comparten la misma conexión (el dashboard
+# leyendo 8 hojas mientras un job de generación descarga otras, o dos
+# pestañas del frontend pidiendo a la vez), los registros TLS se corrompen
+# y salen errores intermitentes "SSL: WRONG_VERSION_NUMBER" /
+# "DECRYPTION_FAILED_OR_BAD_RECORD_MAC" → 502 que dejaban al frontend
+# colgado en "Cargando...". Confirmado en vivo el 2026-07-07. La solución
+# estándar es UN service por hilo (thread-local); las credenciales sí se
+# comparten (son thread-safe).
+_creds = None
+_thread_local = threading.local()
 
 
 def get_sheets_service():
-    global _service
-    if _service is None:
-        creds = service_account.Credentials.from_service_account_file(
+    global _creds
+    if _creds is None:
+        _creds = service_account.Credentials.from_service_account_file(
             str(CREDENTIALS_PATH), scopes=SCOPES
         )
-        _service = build("sheets", "v4", credentials=creds)
-    return _service
+    if getattr(_thread_local, "service", None) is None:
+        # static_discovery=True usa el esquema de la API empaquetado en la
+        # librería en vez de descargarlo por red en cada build() (~1 s extra
+        # por hilo nuevo — era parte de la lentitud del dashboard).
+        _thread_local.service = build(
+            "sheets", "v4", credentials=_creds,
+            cache_discovery=False, static_discovery=True,
+        )
+    return _thread_local.service
+
+
+# Caché de lecturas con TTL corto. Las hojas se leen MUCHO más de lo que
+# cambian (el dashboard solo lee 8 hojas por carga; el panel de PMI relee
+# 1_general en cada clic) y cada lectura a la API de Sheets tarda ~1-2 s.
+# 30 s de datos "viejos" es aceptable para listados; las ESCRITURAS de este
+# backend invalidan la hoja tocada de inmediato, así que lo que el usuario
+# edita desde la webapp se refleja al instante. Lo único que puede tardar
+# hasta 30 s en aparecer son cambios hechos por fuera (AppSheet/Sheets).
+_CACHE_TTL_SEG = 30
+_cache: dict[tuple[str, str], tuple[float, list]] = {}
+_cache_lock = threading.Lock()
+
+
+def invalidar_cache(spreadsheet_id: str, sheet_name: str | None = None):
+    with _cache_lock:
+        if sheet_name is None:
+            for key in [k for k in _cache if k[0] == spreadsheet_id]:
+                del _cache[key]
+        else:
+            _cache.pop((spreadsheet_id, sheet_name), None)
 
 
 def read_sheet_as_dicts(spreadsheet_id: str, sheet_name: str) -> list[dict]:
     """Lee una hoja completa y la devuelve como lista de dicts {header: valor}.
     Headers normalizados con strip() + lower() (ver hallazgo del espacio en
-    'observaciones ' documentado en 03_SINCRONIZACION_SHEETS.md)."""
+    'observaciones ' documentado en 03_SINCRONIZACION_SHEETS.md).
+    Cachea el resultado por _CACHE_TTL_SEG segundos (ver comentario arriba)."""
+    key = (spreadsheet_id, sheet_name)
+    ahora = time.monotonic()
+    with _cache_lock:
+        entrada = _cache.get(key)
+        if entrada and ahora - entrada[0] < _CACHE_TTL_SEG:
+            return entrada[1]
+
     service = get_sheets_service()
     result = (
         service.spreadsheets()
@@ -77,6 +125,8 @@ def read_sheet_as_dicts(spreadsheet_id: str, sheet_name: str) -> list[dict]:
     )
     rows = result.get("values", [])
     if not rows:
+        with _cache_lock:
+            _cache[key] = (ahora, [])
         return []
     headers = [str(h).strip().lower() for h in rows[0]]
     out = []
@@ -92,6 +142,8 @@ def read_sheet_as_dicts(spreadsheet_id: str, sheet_name: str) -> list[dict]:
             if h not in d:
                 d[h] = v
         out.append(d)
+    with _cache_lock:
+        _cache[key] = (ahora, out)
     return out
 
 
@@ -119,6 +171,7 @@ def append_row(spreadsheet_id: str, sheet_name: str, data: dict) -> None:
         insertDataOption="INSERT_ROWS",
         body={"values": [row]},
     ).execute()
+    invalidar_cache(spreadsheet_id, sheet_name)
 
 
 def update_cell_by_key(
@@ -134,6 +187,9 @@ def update_cell_by_key(
     headers = get_sheet_headers(spreadsheet_id, sheet_name)
     if key_column not in headers or column_to_update not in headers:
         return False
+    # El índice de fila se calcula a partir de la lectura: debe ser FRESCA
+    # (no del caché), porque una fila corrida escribiría en la celda equivocada.
+    invalidar_cache(spreadsheet_id, sheet_name)
     rows = read_sheet_as_dicts(spreadsheet_id, sheet_name)
     for idx, row in enumerate(rows):
         if str(row.get(key_column, "")).strip() == str(key_value).strip():
@@ -146,6 +202,7 @@ def update_cell_by_key(
                 valueInputOption="USER_ENTERED",
                 body={"values": [[new_value]]},
             ).execute()
+            invalidar_cache(spreadsheet_id, sheet_name)
             return True
     return False
 
@@ -158,6 +215,8 @@ def delete_rows_by_key(
     """Elimina todas las filas donde key_column == key_value."""
     headers = get_sheet_headers(spreadsheet_id, sheet_name)
     if key_column not in headers: return 0
+    # Igual que update_cell_by_key: los índices de fila exigen lectura fresca.
+    invalidar_cache(spreadsheet_id, sheet_name)
     rows = read_sheet_as_dicts(spreadsheet_id, sheet_name)
     
     service = get_sheets_service()
@@ -188,6 +247,7 @@ def delete_rows_by_key(
             spreadsheetId=spreadsheet_id,
             body={"requests": requests}
         ).execute()
-        
+        invalidar_cache(spreadsheet_id, sheet_name)
+
     return deleted_count
 

@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ademincol-backend",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--reload", "--port", "8000"],
+      "cwd": "ADEMINCOL-Central/backend",
+      "port": 8000
+    },
+    {
+      "name": "ademincol-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "ADEMINCOL-Central/frontend",
+      "port": 5174
+    }
+  ]
+}

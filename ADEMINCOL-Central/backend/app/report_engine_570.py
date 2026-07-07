@@ -22,7 +22,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from .image_utils import descargar_imagen, insertar_imagen_centrada
+from .image_utils import desactivar_fit_to_page, descargar_imagen, insertar_imagen_centrada
 
 logger = logging.getLogger("report_engine_570")
 
@@ -198,6 +198,7 @@ def generar_reporte_570(
     _reportar(3, "Preparando plantilla")
     wb = load_workbook(TEMPLATE_PATH)
     ws = wb[HOJA_FORMATO]
+    desactivar_fit_to_page(ws)
 
     _reportar(5, "Escribiendo datos generales")
     for campo, celda in CELDAS_GENERALES.items():

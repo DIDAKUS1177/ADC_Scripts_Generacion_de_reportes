@@ -10,13 +10,14 @@ dinámicamente, lo que simplifica bastante el motor.
 """
 import io
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.utils.cell import coordinate_from_string
 
-from .chart_durezas import generar_grafico_durezas
-from .image_utils import descargar_imagen, insertar_imagen_centrada
+from .chart_durezas import ELEMENTO_DEFAULT, generar_grafico_durezas
+from .image_utils import desactivar_fit_to_page, descargar_imagen, insertar_imagen_centrada
 
 logger = logging.getLogger("report_engine_pmi")
 
@@ -80,6 +81,44 @@ CELDAS_IMAGENES = {
     "link_firma": "G223",
 }
 
+# Bloque de firmas (fila 222: "REALIZADO POR" / "REVISADO POR" / "APROBADO
+# POR"). G223-226 (realizado = inspector) ya se llenaba con 'link_firma'/
+# 'nombre'/'cargo'. P223-226 (revisado = supervisor que genera el reporte
+# desde la webapp) es nuevo (decisión 2026-07-05, primera prueba con PMI):
+# se llena con el usuario autenticado en la plataforma, NO con un dato del
+# Sheet de PMI — main.py lo resuelve contra la BD de usuarios y lo pasa aquí
+# como 'supervisor_nombre'/'supervisor_cargo'/'supervisor_firma_link'.
+CELDA_FIRMA_SUPERVISOR = "P223"
+CELDA_NOMBRE_SUPERVISOR = "P224"
+CELDA_CARGO_SUPERVISOR = "P225"
+CELDA_FECHA_SUPERVISOR = "P226"
+
+# B221 (celda combinada B221:AG221, vacía en la plantilla) lista los puntos
+# atípicos de durezas que se quitaron del gráfico automático (decisión
+# 2026-07-08, ver generar_grafico_durezas en chart_durezas.py).
+CELDA_ATIPICOS_DUREZAS = "B221"
+
+def _valor_tipado(valor):
+    """Todo lo que llega de la API de Sheets es TEXTO, incluso los números
+    (ej. "145", "69.5"). Escribir ese texto tal cual en una celda hace que
+    Excel la trate como texto: se pierde el formato numérico ya definido en
+    la plantilla (decimales, alineación...) y cualquier fórmula que
+    referencie esa celda (promedios, tolerancias, etc.) la ignora o falla —
+    bug encontrado el 2026-07-08 ("los datos numéricos no salen con formato
+    ... las funciones no se ejecutan"). Si el texto es un número válido se
+    convierte a int/float real; si no, se deja como texto tal cual."""
+    if valor is None or isinstance(valor, (int, float)):
+        return valor
+    texto = str(valor).strip()
+    if not texto:
+        return valor
+    try:
+        numero = float(texto.replace(",", "."))
+    except ValueError:
+        return valor
+    return int(numero) if numero.is_integer() else numero
+
+
 # Rangos fijos de la tabla de química (18 slots: 6 filas x 3 columnas).
 # NOTA: la plantilla real tiene 7 filas por columna (21 slots, ver fila 142
 # con índice "7"/"14"/"21"), pero el script GAS original solo usa 6
@@ -114,6 +153,20 @@ ELEM_KEY = {
     "cr (cromo)": "cr", "cr": "cr", "mo (molibdeno)": "mo", "mo": "mo",
     "v (vanadio)": "v", "v": "v", "b (boro)": "b", "b": "b",
 }
+
+
+def extraer_ksis(durezas: list[dict]) -> list[float]:
+    """Valores numéricos de ksi en el orden en que vienen las durezas —
+    usado tanto al generar el reporte como en el endpoint de previsualización
+    del gráfico (ver /api/preview/pmi/{id}/grafico-durezas en main.py)."""
+    ksis = []
+    for row in durezas:
+        raw = str(row.get("ksi", "")).strip().replace(",", ".")
+        try:
+            ksis.append(float(raw))
+        except ValueError:
+            continue
+    return ksis
 
 
 def calcular_ce(quimica: list[dict]) -> float | None:
@@ -161,6 +214,7 @@ def generar_reporte_pmi(
     _reportar(5, "Preparando plantilla")
     wb = load_workbook(TEMPLATE_PATH)
     ws = wb["FORMATO_MATERIALES"]
+    desactivar_fit_to_page(ws)
 
     _reportar(15, "Escribiendo datos generales")
     # CELDAS_GENERALES conserva las mayúsculas del script GAS original (para
@@ -185,7 +239,7 @@ def generar_reporte_pmi(
                 campo, celda,
             )
             continue
-        ws[celda] = valor
+        ws[celda] = _valor_tipado(valor)
 
     _reportar(30, "Calculando química y durezas")
     # Química: promediar mediciones repetidas por elemento (igual al GAS),
@@ -221,9 +275,9 @@ def generar_reporte_pmi(
         dureza = row.get("Dureza")
         ksi = row.get("ksi")
         if dureza not in (None, ""):
-            ws[RANGO_DUREZAS[idx]] = dureza
+            ws[RANGO_DUREZAS[idx]] = _valor_tipado(dureza)
         if ksi not in (None, "") and idx < len(RANGO_KSI):
-            ws[RANGO_KSI[idx]] = ksi
+            ws[RANGO_KSI[idx]] = _valor_tipado(ksi)
 
     _reportar(45, "Insertando imágenes")
     total_imgs = len(CELDAS_IMAGENES)
@@ -232,24 +286,22 @@ def generar_reporte_pmi(
         pct = 45 + round((i / max(total_imgs, 1)) * 50)
 
         # link_imagen_10 (celda R202) es el gráfico Tensión vs Punto que
-        # antes se generaba corriendo un script en R y se subía a mano
-        # (decisión 2026-07-04). Si el inspector no subió nada ahí, se
-        # genera automáticamente aquí mismo a partir de las durezas del
-        # informe. Si SÍ subió una imagen manual, se respeta esa (permite
-        # reemplazar el gráfico automático en un caso puntual).
-        if campo == "link_imagen_10" and not url:
+        # antes se generaba corriendo un script en R y se subía a mano.
+        # Decisión 2026-07-08: el gráfico SIEMPRE se genera aquí, incluso si
+        # el inspector subió una imagen manual — deja de respetarse esa
+        # imagen (antes se usaba como prioridad; ahora el gráfico automático
+        # la reemplaza en todos los casos).
+        if campo == "link_imagen_10":
             _reportar(pct, "Generando gráfico de durezas")
-            ksis = []
-            for row in durezas:
-                raw = str(row.get("ksi", "")).strip().replace(",", ".")
-                try:
-                    ksis.append(float(raw))
-                except ValueError:
-                    continue
-            grafico_bytes = generar_grafico_durezas(ksis)
+            elemento = str(fila_general.get("elemento_grafico") or ELEMENTO_DEFAULT).strip().upper()
+            grafico_bytes, resumen_atipicos = generar_grafico_durezas(extraer_ksis(durezas), elemento)
             if grafico_bytes:
                 col, fila = coordinate_from_string(celda)
                 insertar_imagen_centrada(ws, grafico_bytes, f"{col}{fila}")
+            # Puntos atípicos (fuera de [Lim. Inf., Lim. Sup.]) que se
+            # quitaron del gráfico — se listan aquí en vez de dibujarse.
+            if resumen_atipicos:
+                ws[CELDA_ATIPICOS_DUREZAS] = resumen_atipicos
             continue
 
         if not url:
@@ -259,6 +311,19 @@ def generar_reporte_pmi(
         if img_bytes:
             col, fila = coordinate_from_string(celda)
             insertar_imagen_centrada(ws, img_bytes, f"{col}{fila}")
+
+    # Bloque "REVISADO POR" (P223-226) — supervisor que generó el reporte
+    # desde la webapp (ver comentario en CELDA_NOMBRE_SUPERVISOR arriba).
+    supervisor_nombre = fila_general.get("supervisor_nombre")
+    if supervisor_nombre:
+        _reportar(96, "Escribiendo datos del supervisor")
+        ws[CELDA_NOMBRE_SUPERVISOR] = supervisor_nombre
+        if fila_general.get("supervisor_cargo"):
+            ws[CELDA_CARGO_SUPERVISOR] = fila_general["supervisor_cargo"]
+        ws[CELDA_FECHA_SUPERVISOR] = datetime.now().strftime("%Y-%m-%d")
+        firma_bytes = descargar_imagen(fila_general.get("supervisor_firma_link", ""))
+        if firma_bytes:
+            insertar_imagen_centrada(ws, firma_bytes, CELDA_FIRMA_SUPERVISOR)
 
     _reportar(97, "Guardando archivo")
     buffer = io.BytesIO()
