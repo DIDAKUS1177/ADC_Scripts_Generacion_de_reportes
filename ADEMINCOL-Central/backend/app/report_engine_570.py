@@ -23,6 +23,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 from .image_utils import desactivar_fit_to_page, descargar_imagen, insertar_imagen_centrada
+from .report_utils import valor_tipado
 
 logger = logging.getLogger("report_engine_570")
 
@@ -204,7 +205,7 @@ def generar_reporte_570(
     for campo, celda in CELDAS_GENERALES.items():
         valor = fila_general.get(campo)
         if valor:
-            ws[celda] = valor
+            ws[celda] = valor_tipado(valor)
 
     total_fotos = sum(len(f) for f in secciones_fotos.values()) or 1
     fotos_procesadas = 0
@@ -237,7 +238,7 @@ def generar_reporte_570(
             for campo, col in config["mapping"].items():
                 valor = reg.get(campo)
                 if valor:
-                    ws[f"{col}{fila_actual}"] = valor
+                    ws[f"{col}{fila_actual}"] = valor_tipado(valor)
 
         filas_acumuladas += filas_extra_datos
 
@@ -294,7 +295,7 @@ def generar_reporte_570(
         if valor:
             col = celda[0]
             fila = int(celda[1:]) + filas_acumuladas
-            ws[f"{col}{fila}"] = valor
+            ws[f"{col}{fila}"] = valor_tipado(valor)
 
     _reportar(97, "Guardando archivo")
     buffer = io.BytesIO()

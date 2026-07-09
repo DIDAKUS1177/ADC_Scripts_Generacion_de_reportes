@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ademincol
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-dev_password_cambiar}
+      POSTGRES_DB: ademincol_central
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Postgres corre TODO .sql que encuentre acá, en orden alfabético, pero
+      # SOLO la primera vez que el volumen está vacío (si ya hay datos, no
+      # vuelve a correr esto — para reaplicar cambios hay que borrar el
+      # volumen o correr el .sql a mano con `docker compose exec db psql`).
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ademincol"]
+      interval: 5s
+      retries: 5
+
+volumes:
+  pgdata:

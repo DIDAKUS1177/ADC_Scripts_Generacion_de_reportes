@@ -18,6 +18,7 @@ from openpyxl.utils.cell import coordinate_from_string
 
 from .chart_durezas import ELEMENTO_DEFAULT, generar_grafico_durezas
 from .image_utils import desactivar_fit_to_page, descargar_imagen, insertar_imagen_centrada
+from .report_utils import valor_tipado
 
 logger = logging.getLogger("report_engine_pmi")
 
@@ -97,27 +98,6 @@ CELDA_FECHA_SUPERVISOR = "P226"
 # atípicos de durezas que se quitaron del gráfico automático (decisión
 # 2026-07-08, ver generar_grafico_durezas en chart_durezas.py).
 CELDA_ATIPICOS_DUREZAS = "B221"
-
-def _valor_tipado(valor):
-    """Todo lo que llega de la API de Sheets es TEXTO, incluso los números
-    (ej. "145", "69.5"). Escribir ese texto tal cual en una celda hace que
-    Excel la trate como texto: se pierde el formato numérico ya definido en
-    la plantilla (decimales, alineación...) y cualquier fórmula que
-    referencie esa celda (promedios, tolerancias, etc.) la ignora o falla —
-    bug encontrado el 2026-07-08 ("los datos numéricos no salen con formato
-    ... las funciones no se ejecutan"). Si el texto es un número válido se
-    convierte a int/float real; si no, se deja como texto tal cual."""
-    if valor is None or isinstance(valor, (int, float)):
-        return valor
-    texto = str(valor).strip()
-    if not texto:
-        return valor
-    try:
-        numero = float(texto.replace(",", "."))
-    except ValueError:
-        return valor
-    return int(numero) if numero.is_integer() else numero
-
 
 # Rangos fijos de la tabla de química (18 slots: 6 filas x 3 columnas).
 # NOTA: la plantilla real tiene 7 filas por columna (21 slots, ver fila 142
@@ -239,7 +219,7 @@ def generar_reporte_pmi(
                 campo, celda,
             )
             continue
-        ws[celda] = _valor_tipado(valor)
+        ws[celda] = valor_tipado(valor)
 
     _reportar(30, "Calculando química y durezas")
     # Química: promediar mediciones repetidas por elemento (igual al GAS),
@@ -264,7 +244,18 @@ def generar_reporte_pmi(
                             len(RANGO_QUIMICA_ELEMENTO))
             break
         ws[RANGO_QUIMICA_ELEMENTO[idx]] = elem
-        ws[RANGO_QUIMICA_VALOR[idx]] = datos["suma"] / datos["n"]
+        # Bug encontrado 2026-07-09: 'Valor' en el Sheet trae el % ya escrito
+        # (ej. "1.12%" -> tras el strip() de arriba queda 1.12, el NÚMERO
+        # 1.12 no la fracción 0.0112). Las celdas G136/Q136/AA136... tienen
+        # number_format '0.00%' en la plantilla — Excel multiplica por 100 al
+        # mostrar un valor con formato de porcentaje, así que escribir 1.12
+        # tal cual se veía como "112.00%" (y 93.50 -> "9350.00%"). Se divide
+        # entre 100 aquí, al ESCRIBIR en Excel, para volver a la fracción que
+        # el formato de la celda espera — calcular_ce() sigue usando el
+        # promedio SIN dividir (datos["suma"]/datos["n"]), porque la fórmula
+        # de Carbono Equivalente ya está definida en términos del número de
+        # porcentaje (ej. C=0.12 para 0.12%), no de la fracción.
+        ws[RANGO_QUIMICA_VALOR[idx]] = (datos["suma"] / datos["n"]) / 100
 
     # Durezas: se listan en el orden que vienen, sin promediar (igual al GAS)
     for idx, row in enumerate(durezas):
@@ -275,9 +266,9 @@ def generar_reporte_pmi(
         dureza = row.get("Dureza")
         ksi = row.get("ksi")
         if dureza not in (None, ""):
-            ws[RANGO_DUREZAS[idx]] = _valor_tipado(dureza)
+            ws[RANGO_DUREZAS[idx]] = valor_tipado(dureza)
         if ksi not in (None, "") and idx < len(RANGO_KSI):
-            ws[RANGO_KSI[idx]] = _valor_tipado(ksi)
+            ws[RANGO_KSI[idx]] = valor_tipado(ksi)
 
     _reportar(45, "Insertando imágenes")
     total_imgs = len(CELDAS_IMAGENES)

@@ -1,5 +1,11 @@
 # Fase 1 — Base de datos PostgreSQL
 
+> ⚠️ **Este documento describe el plan ORIGINAL (Docker + Alembic + SQLAlchemy), que
+> no fue lo que terminó pasando.** En la práctica se usó un proyecto de Supabase ya
+> existente, sin Docker ni Alembic. Ver **`07_CONTEXTO_MIGRACION_POSTGRES.md`** para
+> lo que realmente se construyó (esquema real, bugs encontrados, decisiones). Este
+> archivo queda como referencia histórica del plan original, no como estado actual.
+
 **Objetivo:** PostgreSQL corriendo en Docker con el esquema completo y migraciones Alembic.
 **Resultado verificable:** `docker compose up db` + `alembic upgrade head` deja todas las
 tablas creadas y el seed de datos de desarrollo cargado.

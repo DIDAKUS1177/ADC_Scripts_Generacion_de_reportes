@@ -6,6 +6,7 @@ import {
   RefreshCw,
   UserCircle,
   Award,
+  Database,
 } from "lucide-react";
 import type { Role } from "../../types";
 import type { ComponentType } from "react";
@@ -24,6 +25,7 @@ export const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { to: "/ots", label: "Órdenes de Trabajo", icon: ClipboardList },
     { to: "/inspecciones", label: "Reportes", icon: FileSearch },
     { to: "/sync", label: "Sincronización", icon: RefreshCw },
+    { to: "/base-de-datos", label: "Base de Datos", icon: Database },
     { to: "/perfil", label: "Mi Perfil", icon: UserCircle },
   ],
   SUPERVISOR: [

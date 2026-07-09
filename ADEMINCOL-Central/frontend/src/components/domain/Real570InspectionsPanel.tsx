@@ -15,6 +15,7 @@ import { Badge } from "../ui/Badge";
 import { useToast } from "../ui/Toast";
 import { useBatchGeneration } from "./useBatchGeneration";
 import { BatchGenerationStatus } from "./BatchGenerationStatus";
+import { FotosPorSeccion } from "./FotosPorSeccion";
 
 // Panel de datos REALES de API 570 (Inspección Visual de Tubería). A
 // diferencia de MT/PMI, el reporte tiene 15 secciones independientes con
@@ -106,7 +107,7 @@ export function Real570InspectionsPanel() {
     }
   }
 
-  if (items === null && !error) return <Spinner label="Consultando Google Sheets..." />;
+  if (items === null && !error) return <Spinner label="Cargando informes..." />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (items !== null && items.length === 0) {
     return (
@@ -295,6 +296,11 @@ export function Real570InspectionsPanel() {
                 </div>
               ))}
             </div>
+
+            <p className="mb-2 mt-4 flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-400">
+              <ImageIcon size={12} /> Fotos ({detail.totalFotos})
+            </p>
+            <FotosPorSeccion fotos={detail.fotos} />
           </div>
         )}
       </div>

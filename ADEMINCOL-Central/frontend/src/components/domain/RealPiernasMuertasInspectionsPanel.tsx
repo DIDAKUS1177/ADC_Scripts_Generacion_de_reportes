@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Eye, ImageIcon, Layers, PencilLine } from "lucide-react";
 import {
   downloadJobResult,
-  fetchReal510InspectionDetail,
-  fetchReal510Inspections,
+  fetchRealPiernasMuertasInspectionDetail,
+  fetchRealPiernasMuertasInspections,
   getJobStatus,
   startReportJob,
   PreviewApiError,
-  type Sh510PreviewDetail,
-  type Sh510PreviewItem,
+  type PiernasMuertasPreviewDetail,
+  type PiernasMuertasPreviewItem,
 } from "../../api/previewClient";
 import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
@@ -17,38 +17,48 @@ import { useBatchGeneration } from "./useBatchGeneration";
 import { BatchGenerationStatus } from "./BatchGenerationStatus";
 import { FotosPorSeccion } from "./FotosPorSeccion";
 
-// Panel de datos REALES de API 510 (Inspección Visual de Recipientes a
-// Presión). Igual patrón que Real570InspectionsPanel: resumen de secciones
-// en vez de mostrar cada registro. Diferencia interna (no visible aquí):
-// datos y fotos viven en dos Google Sheets separados — el backend ya lo
-// resuelve.
-export function Real510InspectionsPanel() {
+// Panel de datos REALES de APP009 Piernas Muertas UT. A diferencia de los
+// demás tipos de reporte, este está organizado por Sistema -> PM (igual que
+// el gestor web original en Apps Script), así que se agrega un selector de
+// sistema además del buscador. Sin OT, sin inspector/firma (el Sheet no
+// tiene esas columnas — ver report_engine_piernas_muertas.py) y sin
+// link_reporte, por lo que el estado siempre se muestra como Pendiente.
+export function RealPiernasMuertasInspectionsPanel() {
   const toast = useToast();
-  const [items, setItems] = useState<Sh510PreviewItem[] | null>(null);
+  const [items, setItems] = useState<PiernasMuertasPreviewItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<Sh510PreviewDetail | null>(null);
+  const [detail, setDetail] = useState<PiernasMuertasPreviewDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [job, setJob] = useState<{ pct: number; etapa: string } | null>(null);
   const pollRef = useRef<number | null>(null);
   const [query, setQuery] = useState("");
-  const batchGen = useBatchGeneration("510");
+  const [sistema, setSistema] = useState<string>("");
+  const batchGen = useBatchGeneration("piernas_muertas");
+
+  const sistemas = useMemo(() => {
+    if (!items) return [];
+    const set = new Set(items.map((it) => it.sistema).filter((s): s is string => !!s));
+    return Array.from(set).sort();
+  }, [items]);
 
   const filtered = useMemo(() => {
     if (!items) return null;
+    let base = items;
+    if (sistema) base = base.filter((it) => it.sistema === sistema);
     const q = query.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((it) =>
-      [it.idInforme, it.cliente, it.sistema, it.inspector, it.fecha, it.workOrderNumero]
+    if (!q) return base;
+    return base.filter((it) =>
+      [it.idInforme, it.cliente, it.reporteN, it.sistema, it.fecha]
         .some((v) => String(v || "").toLowerCase().includes(q))
     );
-  }, [items, query]);
+  }, [items, query, sistema]);
 
   function load() {
     setError(null);
     setItems(null);
-    fetchReal510Inspections()
+    fetchRealPiernasMuertasInspections()
       .then(setItems)
       .catch((e) => setError(e instanceof Error ? e.message : "Error desconocido"));
   }
@@ -60,12 +70,12 @@ export function Real510InspectionsPanel() {
     };
   }, []);
 
-  function openDetail(pvid: string) {
-    setSelected(pvid);
+  function openDetail(idPm: string) {
+    setSelected(idPm);
     setDetail(null);
     setDetailError(null);
     setEdits({});
-    fetchReal510InspectionDetail(pvid)
+    fetchRealPiernasMuertasInspectionDetail(idPm)
       .then(setDetail)
       .catch((e) => setDetailError(e instanceof Error ? e.message : "Error desconocido"));
   }
@@ -74,7 +84,7 @@ export function Real510InspectionsPanel() {
     if (!selected || job) return;
     setJob({ pct: 0, etapa: "Iniciando..." });
     try {
-      const jobId = await startReportJob("510", selected, edits);
+      const jobId = await startReportJob("piernas_muertas", selected, edits);
       pollRef.current = window.setInterval(async () => {
         try {
           const status = await getJobStatus(jobId);
@@ -86,7 +96,7 @@ export function Real510InspectionsPanel() {
           pollRef.current = null;
           if (status.estado === "DONE") {
             setJob({ pct: 100, etapa: "Descargando..." });
-            await downloadJobResult(jobId, "510", selected);
+            await downloadJobResult(jobId, "piernas_muertas", selected);
             toast.success("Reporte generado y descargado.");
             status.warnings.forEach((w) => toast.error(`⚠️ ${w}`));
           } else {
@@ -109,21 +119,31 @@ export function Real510InspectionsPanel() {
   if (items === null && !error) return <Spinner label="Cargando informes..." />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (items !== null && items.length === 0) {
-    return (
-      <EmptyState title="Sin informes" description="La hoja 0.pv_general no tiene pvid con datos." />
-    );
+    return <EmptyState title="Sin informes" description="La hoja 1_general no tiene id_pm con datos." />;
   }
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       <div className="max-h-[70vh] flex flex-col rounded-xl border border-ink-200 bg-white">
-        <div className="border-b border-ink-200 p-3">
+        <div className="border-b border-ink-200 p-3 space-y-2">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por ID, cliente, tag, inspector, fecha..."
+            placeholder="Buscar por ID, cliente, nombre PP, fecha..."
             className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
           />
+          <select
+            value={sistema}
+            onChange={(e) => setSistema(e.target.value)}
+            className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
+          >
+            <option value="">Todos los sistemas ({items?.length ?? 0})</option>
+            {sistemas.map((s) => (
+              <option key={s} value={s}>
+                {s} ({items?.filter((it) => it.sistema === s).length})
+              </option>
+            ))}
+          </select>
         </div>
         {batchGen.selected.size > 0 && (
           <div className="flex items-center justify-between gap-2 border-b border-brand-100 bg-brand-50 px-3 py-2">
@@ -160,10 +180,10 @@ export function Real510InspectionsPanel() {
                     className="h-3.5 w-3.5 accent-brand-600"
                   />
                 </th>
-                <th className="px-4 py-2.5">ID Informe</th>
-                <th className="px-4 py-2.5">Cliente</th>
+                <th className="px-4 py-2.5">ID PM</th>
+                <th className="px-4 py-2.5">Nombre</th>
+                <th className="px-4 py-2.5">Sistema</th>
                 <th className="px-4 py-2.5">Fecha</th>
-                <th className="px-4 py-2.5">Tag</th>
                 <th className="px-4 py-2.5">Estado</th>
                 <th className="px-4 py-2.5"></th>
               </tr>
@@ -186,13 +206,13 @@ export function Real510InspectionsPanel() {
                     />
                   </td>
                   <td className="px-4 py-2.5 font-mono text-xs text-ink-800">{it.idInforme}</td>
-                  <td className="max-w-[120px] truncate px-4 py-2.5 text-ink-600" title={it.cliente ?? ""}>
-                    {it.cliente ?? "-"}
+                  <td className="max-w-[120px] truncate px-4 py-2.5 text-ink-600" title={it.reporteN ?? ""}>
+                    {it.reporteN ?? "-"}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-ink-600">{it.fecha ?? "-"}</td>
                   <td className="px-4 py-2.5 max-w-[140px] truncate text-ink-600" title={it.sistema ?? ""}>
                     {it.sistema ?? "-"}
                   </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-ink-600">{it.fecha ?? "-"}</td>
                   <td className="px-4 py-2.5">
                     <Badge tone={it.estadoReporte === "GENERADO" ? "green" : "gray"}>
                       {it.estadoReporte === "GENERADO" ? "Generado" : "Pendiente"}
@@ -211,10 +231,10 @@ export function Real510InspectionsPanel() {
       <div className="max-h-[70vh] overflow-auto rounded-xl border border-ink-200 bg-white p-5">
         {!selected && (
           <p className="py-10 text-center text-sm text-ink-400">
-            Selecciona un informe de la lista para ver sus datos reales.
+            Selecciona una pierna muerta de la lista para ver sus datos reales.
           </p>
         )}
-        {selected && !detail && !detailError && <Spinner label="Cargando detalle (11 secciones)..." />}
+        {selected && !detail && !detailError && <Spinner label="Cargando detalle..." />}
         {detailError && <ErrorState message={detailError} />}
         {detail && (
           <div>
@@ -222,7 +242,7 @@ export function Real510InspectionsPanel() {
               <div>
                 <p className="font-mono text-sm font-bold text-ink-900">{detail.idInforme}</p>
                 <p className="text-xs text-ink-400">
-                  {detail.cliente} · {detail.fecha || "sin fecha"} · Tag: {detail.sistema || "-"}
+                  {detail.cliente} · {detail.fecha || "sin fecha"} · Sistema: {detail.sistema || "sin sistema"}
                 </p>
               </div>
               {!job && (
@@ -285,7 +305,7 @@ export function Real510InspectionsPanel() {
                     s.registros > 0 ? "bg-ink-50" : "bg-ink-50/40 text-ink-400"
                   }`}
                 >
-                  <span className="font-medium">{s.sheet.replace(/^\d+\./, "").replace(/_/g, " ")}</span>
+                  <span className="font-medium capitalize">{s.key}</span>
                   <span>
                     {s.registros} registro{s.registros !== 1 ? "s" : ""} · {s.fotos} foto{s.fotos !== 1 ? "s" : ""}
                   </span>

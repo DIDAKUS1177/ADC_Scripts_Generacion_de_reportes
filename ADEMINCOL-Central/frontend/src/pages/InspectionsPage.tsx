@@ -5,14 +5,19 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../components/ui/Toast";
 import { ReportStatusBadge } from "../components/ui/StatusBadge";
 import { Spinner, EmptyState, ErrorState } from "../components/ui/States";
-import { fetchInspections, generateReport, runSync } from "../mock/client";
+import { fetchInspections, generateReport } from "../mock/client";
+import { runSyncReal } from "../api/previewClient";
 import type { InspectionListItem, ReportTypeCode } from "../types";
 import { RealMtInspectionsPanel } from "../components/domain/RealMtInspectionsPanel";
 import { RealPmiInspectionsPanel } from "../components/domain/RealPmiInspectionsPanel";
 import { Real570InspectionsPanel } from "../components/domain/Real570InspectionsPanel";
 import { Real510InspectionsPanel } from "../components/domain/Real510InspectionsPanel";
+import { RealEspesoresInspectionsPanel } from "../components/domain/RealEspesoresInspectionsPanel";
+import { RealScancInspectionsPanel } from "../components/domain/RealScancInspectionsPanel";
+import { RealPiernasMuertasInspectionsPanel } from "../components/domain/RealPiernasMuertasInspectionsPanel";
+import { RealAcfmInspectionsPanel } from "../components/domain/RealAcfmInspectionsPanel";
 
-const TYPE_TABS: { code: ReportTypeCode | "TODOS" | "570" | "510"; label: string }[] = [
+const TYPE_TABS: { code: ReportTypeCode | "TODOS" | "570" | "510" | "SCANC_LINEAS" | "SCANC_RP" | "PIERNAS_MUERTAS" | "ACFM"; label: string }[] = [
   { code: "TODOS", label: "Todos" },
   { code: "MT", label: "MT" },
   { code: "PMI", label: "PMI" },
@@ -20,6 +25,10 @@ const TYPE_TABS: { code: ReportTypeCode | "TODOS" | "570" | "510"; label: string
   { code: "510", label: "API 510" },
   { code: "VT_SOLDADAS", label: "VT Soldadas" },
   { code: "UT_ESPESORES", label: "UT Espesores" },
+  { code: "SCANC_LINEAS", label: "SCAN C — Líneas" },
+  { code: "SCANC_RP", label: "SCAN C — RP" },
+  { code: "PIERNAS_MUERTAS", label: "Piernas Muertas UT" },
+  { code: "ACFM", label: "Insp ACFM" },
 ];
 
 export function InspectionsPage() {
@@ -27,7 +36,7 @@ export function InspectionsPage() {
   const toast = useToast();
   const [items, setItems] = useState<InspectionListItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<ReportTypeCode | "TODOS" | "570" | "510">("TODOS");
+  const [tab, setTab] = useState<ReportTypeCode | "TODOS" | "570" | "510" | "SCANC_LINEAS" | "SCANC_RP" | "PIERNAS_MUERTAS" | "ACFM">("TODOS");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [generatingIds, setGeneratingIds] = useState<Set<number>>(new Set());
@@ -85,11 +94,11 @@ export function InspectionsPage() {
   async function handleSync() {
     setSyncing(true);
     try {
-      const run = await runSync();
-      toast.success(`Sincronización completa: ${run.rowsUpserted} filas actualizadas.`);
+      const resultado = await runSyncReal();
+      toast.success(`Sincronización completa: ${resultado.totalFilas} filas actualizadas.`);
       load();
     } catch {
-      toast.error("Error al sincronizar con Google Sheets.");
+      toast.error("Error al sincronizar.");
     } finally {
       setSyncing(false);
     }
@@ -111,10 +120,11 @@ export function InspectionsPage() {
         <div>
           <h1 className="text-2xl font-bold text-ink-900">Reportes</h1>
           <p className="text-sm text-ink-500">
-            Datos sincronizados desde Google Sheets (AppSheet)
+            Informes de todas las técnicas de inspección
           </p>
         </div>
-        {tab !== "MT" && tab !== "PMI" && tab !== "570" && tab !== "510" && canManage && (
+        {tab !== "MT" && tab !== "PMI" && tab !== "570" && tab !== "510" && tab !== "UT_ESPESORES" &&
+          tab !== "SCANC_LINEAS" && tab !== "SCANC_RP" && canManage && (
           <button
             onClick={handleSync}
             disabled={syncing}
@@ -150,6 +160,16 @@ export function InspectionsPage() {
         <Real570InspectionsPanel />
       ) : tab === "510" ? (
         <Real510InspectionsPanel />
+      ) : tab === "UT_ESPESORES" ? (
+        <RealEspesoresInspectionsPanel />
+      ) : tab === "SCANC_LINEAS" ? (
+        <RealScancInspectionsPanel variante="scanc_lineas" />
+      ) : tab === "SCANC_RP" ? (
+        <RealScancInspectionsPanel variante="scanc_rp" />
+      ) : tab === "PIERNAS_MUERTAS" ? (
+        <RealPiernasMuertasInspectionsPanel />
+      ) : tab === "ACFM" ? (
+        <RealAcfmInspectionsPanel />
       ) : (
         <>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

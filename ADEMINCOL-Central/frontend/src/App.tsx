@@ -11,6 +11,7 @@ import { InspectionsPage } from "./pages/InspectionsPage";
 import { InspectionDetailPage } from "./pages/InspectionDetailPage";
 import { EquiposPage } from "./pages/EquiposPage";
 import { SyncPage } from "./pages/SyncPage";
+import { DatabasePage } from "./pages/DatabasePage";
 import { ProfilePage } from "./pages/ProfilePage";
 
 export default function App() {
@@ -59,6 +60,14 @@ export default function App() {
                 element={
                   <ProtectedRoute roles={["ADMINISTRADOR"]}>
                     <SyncPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/base-de-datos"
+                element={
+                  <ProtectedRoute roles={["ADMINISTRADOR"]}>
+                    <DatabasePage />
                   </ProtectedRoute>
                 }
               />

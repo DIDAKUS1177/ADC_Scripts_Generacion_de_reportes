@@ -31,6 +31,7 @@ export function WorkOrdersPage() {
   const [ots, setOts] = useState<RealOT[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [showServicioModal, setShowServicioModal] = useState(false);
   const [expandedOt, setExpandedOt] = useState<string | null>(null);
 
   function load() {
@@ -53,16 +54,24 @@ export function WorkOrdersPage() {
         <div>
           <h1 className="text-2xl font-bold text-ink-900">Órdenes de Trabajo</h1>
           <p className="text-sm text-ink-500">
-            Base de datos real en Google Sheets — hoja "work_orders"
+            Gestión de órdenes de trabajo y servicios
           </p>
         </div>
         {canCreate && (
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-          >
-            <Plus size={16} /> Nueva OT
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3.5 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-100"
+            >
+              <Plus size={16} /> Nueva OT
+            </button>
+            <button
+              onClick={() => setShowServicioModal(true)}
+              className="flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+            >
+              <Wrench size={16} /> Nuevo Servicio
+            </button>
+          </div>
         )}
       </div>
 
@@ -122,6 +131,16 @@ export function WorkOrdersPage() {
           onClose={() => setShowModal(false)}
           onCreated={() => {
             setShowModal(false);
+            load();
+          }}
+        />
+      )}
+
+      {showServicioModal && (
+        <NewServicioDirectoModal
+          onClose={() => setShowServicioModal(false)}
+          onCreated={() => {
+            setShowServicioModal(false);
             load();
           }}
         />
@@ -323,15 +342,142 @@ function NewOTModal({ onClose, onCreated }: { onClose: () => void; onCreated: ()
             className={inputCls}
           />
         </Field>
+        <div className="flex justify-end gap-3 border-t border-ink-100 bg-ink-50 p-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-ink-600 hover:bg-ink-100"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            Crear OT
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
-        >
-          {saving && <Loader2 size={15} className="animate-spin" />}
-          {saving ? "Guardando en la BD..." : "Crear OT"}
-        </button>
+function NewServicioDirectoModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const { user } = useAuth();
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    tecnica: "MT" as Tecnica,
+    cliente: "",
+    ubicacion: "",
+  });
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!user) return;
+    setSaving(true);
+    try {
+      // 1. Crear OT con número placeholder porque "la OT se da hasta al final del servicio"
+      const numeroPlaceholder = `S/N-${new Date().getTime().toString().slice(-6)}`;
+      const otPayload: Omit<NewOTPayload, "supervisorUsuario"> = {
+        numero: numeroPlaceholder,
+        cliente: form.cliente,
+        ubicacion: form.ubicacion,
+        estado: "PENDIENTE",
+      };
+      
+      const { idOt } = await createRealOT({ ...otPayload, supervisorUsuario: user.usuario });
+      
+      // 2. Crear el servicio amarrado a esa OT
+      await crearServicio(idOt, form.tecnica as Tecnica);
+      
+      toast.success(`Servicio ${form.tecnica} creado (OT provisional: ${numeroPlaceholder}).`);
+      onCreated();
+    } catch (err) {
+      toast.error(err instanceof PreviewApiError ? err.message : "No se pudo crear el servicio directo.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputCls = "w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-md rounded-xl bg-white shadow-2xl"
+      >
+        <div className="flex items-center justify-between border-b border-ink-100 p-5">
+          <h2 className="text-lg font-bold text-ink-900">Nuevo Servicio (Directo)</h2>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 hover:bg-ink-100">
+            <X size={18} />
+          </button>
+        </div>
+        
+        <div className="p-5">
+          <p className="mb-4 text-xs text-ink-500 bg-ink-50 p-3 rounded-lg">
+            Esta opción creará un servicio inmediatamente y le asignará una Orden de Trabajo con un <strong>número provisional</strong> ("S/N-..."). Podrás editar la OT más adelante cuando el cliente confirme el número oficial.
+          </p>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-ink-700">Técnica a ejecutar *</label>
+              <select
+                required
+                value={form.tecnica}
+                onChange={(e) => setForm({ ...form, tecnica: e.target.value as Tecnica })}
+                className={inputCls}
+              >
+                {TECNICAS_DISPONIBLES.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <div>
+              <label className="mb-1 block text-xs font-medium text-ink-700">Cliente (opcional)</label>
+              <input
+                value={form.cliente}
+                onChange={(e) => setForm({ ...form, cliente: e.target.value })}
+                placeholder="Ej: Ecopetrol"
+                className={inputCls}
+              />
+            </div>
+            
+            <div>
+              <label className="mb-1 block text-xs font-medium text-ink-700">Ubicación (opcional)</label>
+              <input
+                value={form.ubicacion}
+                onChange={(e) => setForm({ ...form, ubicacion: e.target.value })}
+                placeholder="Ej: Planta Barrancabermeja"
+                className={inputCls}
+              />
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex justify-end gap-3 border-t border-ink-100 bg-ink-50 p-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-ink-600 hover:bg-ink-100"
+          >
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          >
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            Crear Servicio
+          </button>
+        </div>
       </form>
     </div>
   );

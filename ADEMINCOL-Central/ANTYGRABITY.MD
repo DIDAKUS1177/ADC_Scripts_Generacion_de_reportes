@@ -22,6 +22,28 @@ A continuación se detallan los cambios implementados para cumplir con los reque
 
 ---
 
+## Cambios Realizados (Fase Dashboard y UI Central)
+
+### 1. Dashboard: Gráficos y Métricas
+- **`frontend/src/pages/DashboardPage.tsx`:** Se integró la librería `recharts` para visualizar las métricas en forma de gráficos de barras agrupadas. Ahora el Administrador visualiza gráficamente la distribución de servicios por supervisor y los reportes generados por inspector según las diferentes técnicas (MT, PMI, 570, etc.).
+
+### 2. Gestión Integral de Usuarios (Administrador)
+- **`backend/app/main.py`:** Se implementó el soporte para actualizar usuarios (nombre, correo, rol, cargo, certificado) y para resetear contraseñas de forma segura usando cifrado bcrypt.
+- **`frontend/src/pages/UsersPage.tsx`:** 
+  - Se añadieron iconos de edición y subida de firmas en la tabla general de usuarios.
+  - Se implementó un modal de edición completa (`EditUserModal`) y un modal dedicado para cargar la firma (`FirmaModal`), donde el administrador puede dibujar la firma con el `SignaturePad` o subir un archivo.
+
+### 3. Equipos, Certificados y Autocompletado
+- **`frontend/src/components/ui/ComboSelect.tsx` (NUEVO):** Componente reutilizable que utiliza la etiqueta `<datalist>` nativa para permitir selección y autocompletado inteligente a partir de una lista de opciones.
+- **`frontend/src/pages/EquiposPage.tsx`:** Integración profunda del `ComboSelect`. En Equipos Físicos, permite evitar redundancias al sugerir las categorías y equipos existentes. En Certificados, permite seleccionar un "Inspector" existente y autocompletar automáticamente el campo "Cédula" basándose en el registro.
+- **`backend/app/main.py`:** Se agregó validación en la creación/actualización de Equipos para rechazar duplicados basados en el "Serial ADC".
+
+### 4. Flujo de Órdenes de Trabajo (Opción C)
+- **`frontend/src/pages/WorkOrdersPage.tsx`:** Se reorganizó la botonera superior. Ahora conviven los botones **"Nueva OT"** (secundario) y **"Nuevo Servicio"** (primario).
+- Se implementó el `NewServicioDirectoModal` para permitir la creación rápida de un servicio asociándolo internamente a una Orden de Trabajo provisional (`S/N-xxxxxx`), cubriendo el caso de uso donde el servicio se ejecuta antes de emitir la OT oficial.
+
+---
+
 ## Posibles Mejoras y Recomendaciones (Feedback Arquitectónico)
 
 Analizando el código en esta carpeta, estas son algunas recomendaciones para mejorar la escalabilidad y mantenibilidad del sistema:

@@ -1,20 +1,30 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, CheckCircle2, XCircle, Loader2 } from "lucide-react";
-import { fetchSyncRuns, runSync } from "../mock/client";
-import type { SyncRun } from "../types";
+import { RefreshCw, CheckCircle2, XCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { fetchSyncRunsReal, runSyncReal, PreviewApiError, type SyncRun } from "../api/previewClient";
 import { Spinner, ErrorState } from "../components/ui/States";
 import { useToast } from "../components/ui/Toast";
+
+const NOMBRE_TABLA: Record<string, string> = {
+  usuarios: "Usuarios",
+  work_orders: "Órdenes de trabajo",
+  servicios: "Servicios",
+  equipos_ensayo: "Equipos",
+  personal_certificados: "Certificados del personal",
+  certificados_usuarios: "Certificados de usuarios",
+  consecutivos_reportes: "Consecutivos de reportes",
+};
 
 export function SyncPage() {
   const toast = useToast();
   const [runs, setRuns] = useState<SyncRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [expandido, setExpandido] = useState<number | null>(null);
 
   function load() {
     setError(null);
     setRuns(null);
-    fetchSyncRuns()
+    fetchSyncRunsReal()
       .then(setRuns)
       .catch(() => setError("No se pudo cargar el historial de sincronización."));
   }
@@ -24,11 +34,15 @@ export function SyncPage() {
   async function handleRunNow() {
     setSyncing(true);
     try {
-      await runSync();
-      toast.success("Sincronización manual completada.");
+      const resultado = await runSyncReal();
+      if (resultado.huboError) {
+        toast.error(`Sincronización con errores — ${resultado.totalFilas} filas actualizadas de todos modos.`);
+      } else {
+        toast.success(`Sincronización completa: ${resultado.totalFilas} filas actualizadas.`);
+      }
       load();
-    } catch {
-      toast.error("Error al sincronizar.");
+    } catch (e) {
+      toast.error(e instanceof PreviewApiError ? e.message : "Error al sincronizar.");
     } finally {
       setSyncing(false);
     }
@@ -40,7 +54,7 @@ export function SyncPage() {
         <div>
           <h1 className="text-2xl font-bold text-ink-900">Sincronización</h1>
           <p className="text-sm text-ink-500">
-            Google Sheets → PostgreSQL, automática cada 5 minutos
+            Actualiza usuarios, órdenes de trabajo, servicios, equipos y certificados
           </p>
         </div>
         <button
@@ -56,33 +70,53 @@ export function SyncPage() {
       {runs === null && !error && <Spinner label="Cargando historial..." />}
       {error && <ErrorState message={error} onRetry={load} />}
 
+      {runs !== null && runs.length === 0 && (
+        <p className="text-sm text-ink-400">Todavía no se ha ejecutado ninguna sincronización.</p>
+      )}
+
       {runs !== null && (
         <div className="space-y-2">
-          {runs.map((run) => (
-            <div
-              key={run.id}
-              className="flex items-center justify-between rounded-xl border border-ink-200 bg-white p-4"
-            >
-              <div className="flex items-center gap-3">
-                {run.status === "SUCCESS" && <CheckCircle2 size={18} className="text-emerald-600" />}
-                {run.status === "ERROR" && <XCircle size={18} className="text-brand-600" />}
-                {run.status === "RUNNING" && (
-                  <Loader2 size={18} className="animate-spin text-amber-600" />
+          {runs.map((run) => {
+            const abierto = expandido === run.id;
+            return (
+              <div key={run.id} className="rounded-xl border border-ink-200 bg-white p-4">
+                <button
+                  onClick={() => setExpandido(abierto ? null : run.id)}
+                  className="flex w-full items-center justify-between text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    {run.status === "SUCCESS" && <CheckCircle2 size={18} className="text-emerald-600" />}
+                    {run.status === "ERROR" && <XCircle size={18} className="text-brand-600" />}
+                    <div>
+                      <p className="text-sm font-medium text-ink-800">
+                        {run.rowsUpserted} filas actualizadas
+                        {run.status === "ERROR" && <span className="ml-2 text-xs text-brand-600">con errores</span>}
+                      </p>
+                      <p className="text-xs text-ink-400">
+                        {new Date(run.startedAt).toLocaleString("es-CO")}
+                      </p>
+                    </div>
+                  </div>
+                  {abierto ? <ChevronUp size={16} className="text-ink-400" /> : <ChevronDown size={16} className="text-ink-400" />}
+                </button>
+
+                {abierto && (
+                  <div className="mt-3 space-y-1 border-t border-ink-100 pt-3">
+                    {Object.entries(run.detalle).map(([tabla, valor]) => (
+                      <div key={tabla} className="flex items-center justify-between text-xs">
+                        <span className="text-ink-500">{NOMBRE_TABLA[tabla] ?? tabla}</span>
+                        {typeof valor === "number" ? (
+                          <span className="font-medium text-ink-700">{valor} filas</span>
+                        ) : (
+                          <span className="max-w-[70%] truncate text-brand-600" title={valor}>{valor}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
-                <div>
-                  <p className="text-sm font-medium text-ink-800">
-                    {run.reportType} · {run.rowsUpserted} filas actualizadas
-                  </p>
-                  <p className="text-xs text-ink-400">
-                    {new Date(run.startedAt).toLocaleString("es-CO")}
-                    {run.errorDetail && (
-                      <span className="ml-2 text-brand-600">— {run.errorDetail}</span>
-                    )}
-                  </p>
-                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

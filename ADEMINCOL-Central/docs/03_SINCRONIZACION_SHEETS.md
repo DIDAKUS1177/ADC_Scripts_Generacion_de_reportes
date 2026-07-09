@@ -1,5 +1,13 @@
 # Fase 3 — Sincronización Google Sheets → PostgreSQL
 
+> ⚠️ **La sincronización real que terminó construyéndose (2026-07-09) es
+> `backend/app/sync_service.py`** — cubre las 7 tablas de soporte (usuarios, OTs,
+> servicios, equipos, certificados, consecutivos), no los datos de inspección de
+> cada técnica como planteaba este documento originalmente. Endpoints reales:
+> `POST /api/preview/sync` y `GET /api/preview/sync/runs` (no `/api/v1/...`). Ver
+> **`07_CONTEXTO_MIGRACION_POSTGRES.md`** para el detalle completo. Los hallazgos de
+> conexión a Sheets de abajo (paso 3.1) siguen vigentes.
+
 **Objetivo:** El servicio de sync copia los datos que AppSheet deposita en los Sheets
 hacia PostgreSQL, automáticamente cada 5 minutos y bajo demanda.
 **Resultado verificable:** `POST /api/v1/sync/run` trae las inspecciones del Sheet MT

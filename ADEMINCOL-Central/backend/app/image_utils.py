@@ -76,6 +76,29 @@ def descargar_imagen(url: str) -> bytes | None:
     return None
 
 
+def _ancho_columna(ws, col_letra: str) -> float:
+    """Ancho de columna (unidades de caracter) SIN mutar la hoja.
+
+    `ws.column_dimensions[letra]` (acceso por índice) es un defaultdict: si
+    la columna no tenía ancho explícito, CREA un ColumnDimension nuevo — y
+    ese objeto nuevo trae width=13.0 por defecto (no None). O sea que la
+    sola LECTURA del ancho vía `[...]` graba un ancho de 13 en columnas que
+    debían quedarse con el ancho por defecto de la plantilla. Bug real,
+    confirmado 2026-07-09 con un reporte generado por el usuario: la
+    plantilla PMI no trae ancho explícito en C:AG y el .xlsx generado salía
+    con esas 31 columnas fijadas en 13.0 — esto, no la fórmula de escalado
+    de imagen, era la causa de "las columnas siguen aumentando su tamaño".
+    `.get()` no dispara el auto-creado (no pasa por `__missing__`)."""
+    dim = ws.column_dimensions.get(col_letra)
+    return dim.width if dim and dim.width else 8.43
+
+
+def _alto_fila(ws, fila_num: int) -> float:
+    """Alto de fila (puntos) sin mutar la hoja — ver `_ancho_columna`."""
+    dim = ws.row_dimensions.get(fila_num)
+    return dim.height if dim and dim.height else 15
+
+
 def insertar_imagen_centrada(ws, image_bytes: bytes, celda_ancla: str):
     """Inserta una imagen flotante centrada en el área de la celda (o su rango
     combinado), replicando el fix ya aplicado en los scripts GAS.
@@ -104,13 +127,8 @@ def insertar_imagen_centrada(ws, image_bytes: bytes, celda_ancla: str):
     # que debía y desplazada hacia la izquierda dentro de la celda real —
     # visualmente "no centrada" y con la columna viéndose más ancha que la
     # imagen.
-    ancho_area = sum(
-        (ws.column_dimensions[get_column_letter(c)].width or 8.43) * 7 + 5
-        for c in range(min_col, max_col + 1)
-    )
-    alto_area = sum(
-        (ws.row_dimensions[r].height or 15) for r in range(min_row, max_row + 1)
-    ) * 96 / 72
+    ancho_area = sum(_ancho_columna(ws, get_column_letter(c)) * 7 + 5 for c in range(min_col, max_col + 1))
+    alto_area = sum(_alto_fila(ws, r) for r in range(min_row, max_row + 1)) * 96 / 72
 
     try:
         img = XLImage(io.BytesIO(image_bytes))

@@ -19,6 +19,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 from .image_utils import desactivar_fit_to_page, descargar_imagen, insertar_imagen_centrada
+from .report_utils import valor_tipado
 
 logger = logging.getLogger("report_engine_510")
 
@@ -182,7 +183,7 @@ def generar_reporte_510(
     for campo, celda in CELDAS_GENERALES.items():
         valor = fila_general.get(campo)
         if valor:
-            ws[celda] = valor
+            ws[celda] = valor_tipado(valor)
 
     foto1 = descargar_imagen(fila_general.get("photos_link", ""))
     if foto1:
@@ -222,7 +223,7 @@ def generar_reporte_510(
             for campo, col in config["mapping"].items():
                 valor = reg.get(campo)
                 if valor:
-                    ws[f"{col}{fila_actual}"] = valor
+                    ws[f"{col}{fila_actual}"] = valor_tipado(valor)
 
         filas_acumuladas += filas_extra_datos
 
@@ -275,7 +276,7 @@ def generar_reporte_510(
     if firma_bytes:
         insertar_imagen_centrada(ws, firma_bytes, f"J{fila_firma}")
     if fila_general.get("nombre"):
-        ws[f"J{fila_nombre}"] = fila_general.get("nombre")
+        ws[f"J{fila_nombre}"] = valor_tipado(fila_general.get("nombre"))
 
     _reportar(97, "Guardando archivo")
     buffer = io.BytesIO()

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, BarChart3, Download, Eye, ImageIcon, Layers, Loader2, PencilLine, Signature, X } from "lucide-react";
+import { AlertTriangle, BarChart3, Download, Eye, Layers, Loader2, PencilLine, Signature, X } from "lucide-react";
 import {
   downloadJobResult,
   fetchRealPmiInspectionDetail,
@@ -13,6 +13,7 @@ import {
 } from "../../api/previewClient";
 import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
+import { PhotoGallery } from "../ui/PhotoGallery";
 import { useToast } from "../ui/Toast";
 import { useAuth } from "../../context/AuthContext";
 import { useBatchGeneration } from "./useBatchGeneration";
@@ -116,7 +117,7 @@ export function RealPmiInspectionsPanel() {
     }
   }
 
-  if (items === null && !error) return <Spinner label="Consultando Google Sheets..." />;
+  if (items === null && !error) return <Spinner label="Cargando informes..." />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (items !== null && items.length === 0) {
     return (
@@ -367,25 +368,7 @@ export function RealPmiInspectionsPanel() {
             <p className="mb-2 text-xs font-semibold uppercase text-ink-400">
               Fotos ({detail.fotos.length})
             </p>
-            {detail.fotos.length === 0 ? (
-              <p className="text-xs text-ink-400">Sin fotos registradas.</p>
-            ) : (
-              <div className="grid grid-cols-3 gap-2">
-                {detail.fotos.map((foto, i) => (
-                  <div key={i} className="overflow-hidden rounded-lg border border-ink-200">
-                    <img
-                      src={foto.url}
-                      alt={foto.descripcion}
-                      className="h-20 w-full object-cover"
-                    />
-                    <p className="flex items-center gap-1 px-1.5 py-1 text-[10px] text-ink-600">
-                      <ImageIcon size={10} className="shrink-0" />
-                      <span className="truncate">{foto.descripcion || "Sin descripción"}</span>
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
+            <PhotoGallery fotos={detail.fotos} />
           </div>
         )}
       </div>

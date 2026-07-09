@@ -262,6 +262,39 @@ explícitamente en este mensaje, quedan para la siguiente iteración):
    `fecha_vencimiento_calibracion` de un equipo desde `/equipos`.
 2. Advertencia de "equipo con calibración vencida" al generar un reporte (mismo patrón
    que la de certificado, usando `equipos_ensayo`).
+
+### D18. Medición de Espesores (UT) conectado — quinto tipo de reporte real (2026-07-09)
+Igual que 570/510: `report_engine_espesores.py` + endpoints `/api/preview/espesores*` +
+`RealEspesoresInspectionsPanel.tsx`, verificado con datos e imágenes reales el 2026-07-09.
+Sheet `DB_INSP_Medicion_Espesores` (`1_general` / `2_lecturas_tomadas` / `3_fotografias`),
+plantilla `FORMATOS_SCAN_C` exportada e incorporada como `templates_xlsx/ESPESORES.xlsx`.
+
+- A diferencia de 570/510 (15/11 secciones) hay UNA sola tabla dinámica de lecturas
+  (capacidad nativa 2 filas, igual que MT) — pero es la única de los 5 motores cuya tabla
+  depende de fórmulas vivas por fila (MÁXIMO/MÍNIMO/PROMEDIO/%PÉRDIDA, columnas
+  Z/AB/AD/AF/AH), que hay que propagar a cada fila insertada (`_copiar_formulas_lecturas`,
+  traducción de `copiarFormulasLecturas()`/`ajustarFormulaPorFila()` del GAS original).
+- El script GAS que pegó el usuario (`Reporte_Medicion_Espesores.gs`) tenía la plantilla
+  correcta pero **dos mapeos de celda incorrectos y uno vestigial**, encontrados al
+  verificar celda por celda contra `ESPESORES.xlsx` (mismo rigor que D14 con PMI):
+  `bloque_calibracion` apuntaba a la celda de la ETIQUETA en vez del valor (`AE23` en vez
+  de `AI23`), `procedimiento` caía dentro del merge de una etiqueta sin ser su celda
+  ancla (`P25` en vez de `R25`), y `link_foto_equipo`→`D21` no tiene efecto porque esa
+  columna no existe en la hoja real `1_general` — se descartó.
+- Se agregó el bloque "Revisado por" (P40-44) con el mismo patrón de firma automática del
+  supervisor ya establecido en D14/PMI (P223-226) — el GAS original solo llenaba
+  "Realizado por" (columna del inspector).
+- **Estandarización aplicada a los 5 motores en esta misma tarea** (no solo a Espesores):
+  el fix de "valores numéricos sin formato" que D15 dejó documentado como propio de PMI
+  se extrajo a `report_utils.py` (`valor_tipado()`) y se aplicó también en MT/570/510, que
+  tenían el mismo problema sin reportar.
+- **Bug nuevo encontrado y corregido** (no heredado de 570/510, pero el mismo patrón
+  existe ahí sin corregir — ver tarea flotante creada 2026-07-09): al insertar filas para
+  un segundo bloque de fotos, la inserción ocurría exactamente en la posición de la fila
+  patrón de descripción, dejándola en blanco (pierde alto 19.5px y estilo) antes de
+  usarla como fuente para copiar a los bloques siguientes. Corregido insertando después
+  de esa fila, no en ella (mismo principio que ya usa la tabla de lecturas/resultados en
+  los 5 motores).
 3. Generación automática del consecutivo (`consecutivos_reportes`) en vez de que el
    inspector lo escriba a mano en el Sheet de cada técnica.
 

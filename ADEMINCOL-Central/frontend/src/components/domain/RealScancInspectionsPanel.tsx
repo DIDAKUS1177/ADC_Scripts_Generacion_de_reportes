@@ -1,46 +1,54 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, ImageIcon, Layers, PencilLine } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Download, Eye, ImageIcon, Layers } from "lucide-react";
 import {
   downloadJobResult,
-  fetchReal510InspectionDetail,
-  fetchReal510Inspections,
+  fetchRealScancInspectionDetail,
+  fetchRealScancInspections,
   getJobStatus,
   startReportJob,
   PreviewApiError,
-  type Sh510PreviewDetail,
-  type Sh510PreviewItem,
+  type ScancPreviewDetail,
+  type ScancPreviewItem,
+  type ScancVariante,
 } from "../../api/previewClient";
 import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
+import { PhotoGallery } from "../ui/PhotoGallery";
 import { useToast } from "../ui/Toast";
 import { useBatchGeneration } from "./useBatchGeneration";
 import { BatchGenerationStatus } from "./BatchGenerationStatus";
-import { FotosPorSeccion } from "./FotosPorSeccion";
 
-// Panel de datos REALES de API 510 (Inspección Visual de Recipientes a
-// Presión). Igual patrón que Real570InspectionsPanel: resumen de secciones
-// en vez de mostrar cada registro. Diferencia interna (no visible aquí):
-// datos y fotos viven en dos Google Sheets separados — el backend ya lo
-// resuelve.
-export function Real510InspectionsPanel() {
+// Panel de datos REALES de SCAN C (Ultrasonido tipo C-Scan). Un solo
+// componente sirve para las 2 variantes (líneas / recipientes a presión) —
+// comparten exactamente la misma forma de datos, solo cambia qué
+// spreadsheet consulta el backend (ver report_engine_scanc.py). A
+// diferencia de Espesores, aquí hay DOS tablas de datos (reporte de
+// escaneo + información de ensayo) además de las fotos.
+export function RealScancInspectionsPanel({ variante }: { variante: ScancVariante }) {
   const toast = useToast();
-  const [items, setItems] = useState<Sh510PreviewItem[] | null>(null);
+  const [items, setItems] = useState<ScancPreviewItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<Sh510PreviewDetail | null>(null);
+  const [detail, setDetail] = useState<ScancPreviewDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [edits, setEdits] = useState<Record<string, string>>({});
   const [job, setJob] = useState<{ pct: number; etapa: string } | null>(null);
-  const pollRef = useRef<number | null>(null);
   const [query, setQuery] = useState("");
-  const batchGen = useBatchGeneration("510");
+  const [showLoteModal, setShowLoteModal] = useState(false);
+  const batchGen = useBatchGeneration(variante);
+
+  // Cambiar de pestaña (líneas <-> RP) resetea la selección: son
+  // spreadsheets distintos, un id_general de uno no existe en el otro.
+  useEffect(() => {
+    setSelected(null);
+    setDetail(null);
+  }, [variante]);
 
   const filtered = useMemo(() => {
     if (!items) return null;
     const q = query.trim().toLowerCase();
     if (!q) return items;
     return items.filter((it) =>
-      [it.idInforme, it.cliente, it.sistema, it.inspector, it.fecha, it.workOrderNumero]
+      [it.idInforme, it.cliente, it.workOrderNumero, it.sistema, it.inspector, it.fecha]
         .some((v) => String(v || "").toLowerCase().includes(q))
     );
   }, [items, query]);
@@ -48,24 +56,18 @@ export function Real510InspectionsPanel() {
   function load() {
     setError(null);
     setItems(null);
-    fetchReal510Inspections()
+    fetchRealScancInspections(variante)
       .then(setItems)
       .catch((e) => setError(e instanceof Error ? e.message : "Error desconocido"));
   }
 
-  useEffect(() => {
-    load();
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    };
-  }, []);
+  useEffect(load, [variante]);
 
-  function openDetail(pvid: string) {
-    setSelected(pvid);
+  function openDetail(idGeneral: string) {
+    setSelected(idGeneral);
     setDetail(null);
     setDetailError(null);
-    setEdits({});
-    fetchReal510InspectionDetail(pvid)
+    fetchRealScancInspectionDetail(variante, idGeneral)
       .then(setDetail)
       .catch((e) => setDetailError(e instanceof Error ? e.message : "Error desconocido"));
   }
@@ -74,19 +76,18 @@ export function Real510InspectionsPanel() {
     if (!selected || job) return;
     setJob({ pct: 0, etapa: "Iniciando..." });
     try {
-      const jobId = await startReportJob("510", selected, edits);
-      pollRef.current = window.setInterval(async () => {
+      const jobId = await startReportJob(variante, selected, {});
+      const poll = window.setInterval(async () => {
         try {
           const status = await getJobStatus(jobId);
           if (status.estado === "RUNNING") {
             setJob({ pct: status.pct, etapa: status.etapa });
             return;
           }
-          if (pollRef.current) window.clearInterval(pollRef.current);
-          pollRef.current = null;
+          window.clearInterval(poll);
           if (status.estado === "DONE") {
             setJob({ pct: 100, etapa: "Descargando..." });
-            await downloadJobResult(jobId, "510", selected);
+            await downloadJobResult(jobId, variante, selected);
             toast.success("Reporte generado y descargado.");
             status.warnings.forEach((w) => toast.error(`⚠️ ${w}`));
           } else {
@@ -94,8 +95,7 @@ export function Real510InspectionsPanel() {
           }
           setJob(null);
         } catch {
-          if (pollRef.current) window.clearInterval(pollRef.current);
-          pollRef.current = null;
+          window.clearInterval(poll);
           setJob(null);
           toast.error("Se perdió la conexión con el backend.");
         }
@@ -109,9 +109,7 @@ export function Real510InspectionsPanel() {
   if (items === null && !error) return <Spinner label="Cargando informes..." />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (items !== null && items.length === 0) {
-    return (
-      <EmptyState title="Sin informes" description="La hoja 0.pv_general no tiene pvid con datos." />
-    );
+    return <EmptyState title="Sin informes" description="La hoja 1.0_general no tiene id_general con datos." />;
   }
 
   return (
@@ -121,7 +119,7 @@ export function Real510InspectionsPanel() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por ID, cliente, tag, inspector, fecha..."
+            placeholder="Buscar por ID, cliente, OT, sistema, fecha..."
             className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
           />
         </div>
@@ -129,7 +127,7 @@ export function Real510InspectionsPanel() {
           <div className="flex items-center justify-between gap-2 border-b border-brand-100 bg-brand-50 px-3 py-2">
             <span className="text-xs font-medium text-brand-700">{batchGen.selected.size} seleccionados</span>
             <button
-              onClick={() => batchGen.startBatch()}
+              onClick={() => setShowLoteModal(true)}
               disabled={!!batchGen.batch?.corriendo}
               className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
             >
@@ -163,7 +161,7 @@ export function Real510InspectionsPanel() {
                 <th className="px-4 py-2.5">ID Informe</th>
                 <th className="px-4 py-2.5">Cliente</th>
                 <th className="px-4 py-2.5">Fecha</th>
-                <th className="px-4 py-2.5">Tag</th>
+                <th className="px-4 py-2.5">Sistema</th>
                 <th className="px-4 py-2.5">Estado</th>
                 <th className="px-4 py-2.5"></th>
               </tr>
@@ -214,7 +212,7 @@ export function Real510InspectionsPanel() {
             Selecciona un informe de la lista para ver sus datos reales.
           </p>
         )}
-        {selected && !detail && !detailError && <Spinner label="Cargando detalle (11 secciones)..." />}
+        {selected && !detail && !detailError && <Spinner label="Cargando detalle..." />}
         {detailError && <ErrorState message={detailError} />}
         {detail && (
           <div>
@@ -222,7 +220,7 @@ export function Real510InspectionsPanel() {
               <div>
                 <p className="font-mono text-sm font-bold text-ink-900">{detail.idInforme}</p>
                 <p className="text-xs text-ink-400">
-                  {detail.cliente} · {detail.fecha || "sin fecha"} · Tag: {detail.sistema || "-"}
+                  {detail.cliente} · {detail.fecha || "sin fecha"} · {detail.workOrderNumero || "sin OT"}
                 </p>
               </div>
               {!job && (
@@ -251,55 +249,126 @@ export function Real510InspectionsPanel() {
               </div>
             )}
 
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-400">
-              Datos generales
-              <span className="flex items-center gap-1 rounded bg-ink-100 px-1.5 py-0.5 text-[10px] font-medium normal-case text-ink-500">
-                <PencilLine size={10} /> editables — solo afectan el reporte generado
-              </span>
-            </p>
-            <div className="mb-4 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-              {Object.entries(detail.datosGenerales).map(([k, v]) => (
-                <div key={k}>
-                  <p className="mb-0.5 text-ink-400">{k.replace(/_/g, " ")}</p>
-                  <input
-                    value={edits[k] ?? (v != null ? String(v) : "")}
-                    onChange={(e) => setEdits((prev) => ({ ...prev, [k]: e.target.value }))}
-                    className={`w-full rounded border px-1.5 py-1 text-xs outline-none focus:border-brand-600 ${
-                      edits[k] !== undefined && edits[k] !== (v != null ? String(v) : "")
-                        ? "border-amber-400 bg-amber-50"
-                        : "border-ink-200"
-                    }`}
-                  />
-                </div>
-              ))}
+            <p className="mb-2 text-xs font-semibold uppercase text-ink-400">Datos generales</p>
+            <div className="mb-4 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+              {Object.entries(detail.datosGenerales)
+                .filter(([k, v]) => v && !["firma", "link_firma", "link_reporte", "id_general"].includes(k))
+                .map(([k, v]) => (
+                  <div key={k}>
+                    <p className="text-ink-400">{k.replace(/_/g, " ")}</p>
+                    <p className="truncate font-medium text-ink-700" title={String(v)}>{String(v)}</p>
+                  </div>
+                ))}
             </div>
 
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-400">
-              <ImageIcon size={12} /> Secciones ({detail.secciones.filter((s) => s.registros > 0).length} con datos · {detail.totalFotos} fotos totales)
+            <p className="mb-2 text-xs font-semibold uppercase text-ink-400">
+              Reporte de escaneo ({detail.totalReporteDatos})
             </p>
-            <div className="space-y-1">
-              {detail.secciones.map((s) => (
-                <div
-                  key={s.key}
-                  className={`flex items-center justify-between rounded-lg px-3 py-1.5 text-xs ${
-                    s.registros > 0 ? "bg-ink-50" : "bg-ink-50/40 text-ink-400"
-                  }`}
-                >
-                  <span className="font-medium">{s.sheet.replace(/^\d+\./, "").replace(/_/g, " ")}</span>
-                  <span>
-                    {s.registros} registro{s.registros !== 1 ? "s" : ""} · {s.fotos} foto{s.fotos !== 1 ? "s" : ""}
-                  </span>
-                </div>
-              ))}
-            </div>
+            {detail.reporteDatos.length === 0 ? (
+              <p className="mb-4 text-xs text-ink-400">Sin puntos registrados.</p>
+            ) : (
+              <div className="mb-4 overflow-x-auto rounded-lg border border-ink-100">
+                <table className="w-full text-[11px]">
+                  <thead className="bg-ink-50 text-left uppercase text-ink-400">
+                    <tr>
+                      <th className="px-2 py-1.5">ID</th>
+                      <th className="px-2 py-1.5">CML</th>
+                      <th className="px-2 py-1.5">Ø (in)</th>
+                      <th className="px-2 py-1.5">Espesor nom.</th>
+                      <th className="px-2 py-1.5">Espesor prom.</th>
+                      <th className="px-2 py-1.5">Espesor mín.</th>
+                      <th className="px-2 py-1.5">% pérdida (mín)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {detail.reporteDatos.map((r, i) => (
+                      <tr key={i}>
+                        <td className="px-2 py-1 text-ink-700">{r.id_punto}</td>
+                        <td className="px-2 py-1 text-ink-600">{r.cml}</td>
+                        <td className="px-2 py-1 text-ink-600">{r.diametro_in}</td>
+                        <td className="px-2 py-1 text-ink-600">{r.espesor_nominal_mm}</td>
+                        <td className="px-2 py-1 text-ink-600">{r.espesor_promedio_mm}</td>
+                        <td className="px-2 py-1 text-ink-600">{r.espesor_minimo_mm}</td>
+                        <td className="px-2 py-1 text-ink-600">{r.perdida_basada_en_minimo}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-            <p className="mb-2 mt-4 flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-400">
+            <p className="mb-2 text-xs font-semibold uppercase text-ink-400">
+              Información de ensayo ({detail.totalEnsayoDatos})
+            </p>
+            {detail.ensayoDatos.length === 0 ? (
+              <p className="mb-4 text-xs text-ink-400">Sin anomalías registradas.</p>
+            ) : (
+              <div className="mb-4 overflow-x-auto rounded-lg border border-ink-100">
+                <table className="w-full text-[11px]">
+                  <thead className="bg-ink-50 text-left uppercase text-ink-400">
+                    <tr>
+                      <th className="px-2 py-1.5">ID</th>
+                      <th className="px-2 py-1.5">CML</th>
+                      <th className="px-2 py-1.5">Tipo anomalía</th>
+                      <th className="px-2 py-1.5">% pérdida</th>
+                      <th className="px-2 py-1.5">Observaciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100">
+                    {detail.ensayoDatos.map((r, i) => (
+                      <tr key={i}>
+                        <td className="px-2 py-1 text-ink-700">{r.id_punto}</td>
+                        <td className="px-2 py-1 text-ink-600">{r.cml}</td>
+                        <td className="px-2 py-1 text-ink-600">{r.tipo_anomalia}</td>
+                        <td className="px-2 py-1 text-ink-600">{r.porcentaje_perdida}</td>
+                        <td className="max-w-[160px] truncate px-2 py-1 text-ink-600" title={r.observaciones}>
+                          {r.observaciones}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-400">
               <ImageIcon size={12} /> Fotos ({detail.totalFotos})
             </p>
-            <FotosPorSeccion fotos={detail.fotos} />
+            <PhotoGallery fotos={detail.fotos.map((f) => ({ url: f.url, descripcion: f.descripcion }))} />
           </div>
         )}
       </div>
+
+      {showLoteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-2xl">
+            <h2 className="mb-2 text-lg font-bold text-ink-900">
+              Generar {batchGen.selected.size} reportes
+            </h2>
+            <p className="mb-4 text-sm text-ink-500">
+              Se generarán todos los reportes seleccionados y se descargarán juntos en un .zip.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowLoteModal(false)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-ink-600 hover:bg-ink-100"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  setShowLoteModal(false);
+                  batchGen.startBatch({});
+                }}
+                className="flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+              >
+                <Layers size={14} />
+                Generar lote
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

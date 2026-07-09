@@ -170,6 +170,30 @@ const COLUMNAS_PERSONAL_CERTIFICADOS = [
                            // de fecha_vencimiento; se guarda aquí solo para la
                            // importación inicial desde el Excel de origen
   'created_at',
+  'firma_link',           // NUEVA (2026-07-09, decisión B1 de
+                           // PLAN_AUTOMATIZACION_APPSHEET_MT.md sección 2.3): URL de
+                           // origen de la firma (histórico, de dónde se sacó
+                           // firma_base64 — ver abajo). Ya NO es el campo que se lee
+                           // para mostrar/insertar la firma (ver decisión de
+                           // almacenamiento de imágenes, 2026-07-09): un link de
+                           // AppSheet puede vencer o 404 en cualquier momento (pasó
+                           // con 1 de 7 en el backfill inicial) — se conserva como
+                           // referencia/auditoría, no como dato operativo.
+  'firma_base64',         // NUEVA (2026-07-09, decisión de almacenamiento de
+                           // imágenes): la firma real, como
+                           // "data:image/png;base64,...", igual patrón que
+                           // usuarios.firma_base64 (D8) — pero aquí cubre también a
+                           // personal SIN login en la webapp. Firmas (chicas, una
+                           // por persona) se guardan como base64 directo, sin
+                           // depender de un link externo que haya que resolver;
+                           // fotos de inspección (grandes, muchas por informe,
+                           // capturadas por AppSheet en campo) siguen en Drive vía
+                           // los links de AppSheet — ahí sí hace falta la función de
+                           // descarga (image_utils.descargar_imagen), es la única
+                           // forma de capturarlas hoy. IMPORTANTE: `cc` se repite
+                           // por persona (una fila por técnica certificada) — si se
+                           // llena/edita a mano, replicar el mismo valor en TODAS
+                           // las filas de esa persona.
 ];
 
 // Nueva tabla (2026-07-07) — consecutivo GLOBAL de números de reporte, para

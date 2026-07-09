@@ -35,6 +35,7 @@ import { Spinner, ErrorState, EmptyState } from "../components/ui/States";
 import { Badge } from "../components/ui/Badge";
 import { useToast } from "../components/ui/Toast";
 import { ROLE_LABEL } from "../components/layout/navConfig";
+import { ComboSelect } from "../components/ui/ComboSelect";
 
 type Tab = "personal" | "equipos" | "roster";
 
@@ -293,6 +294,9 @@ function CertificatesModal({ user, onClose }: { user: RealUser; onClose: () => v
                         <option value="PMI">PMI — Caracterización de Materiales</option>
                         <option value="570">API 570 — Inspección Visual de Tubería</option>
                         <option value="510">API 510 — Inspección Visual de Recipientes a Presión</option>
+                        <option value="ESPESORES">Espesores — Medición por Ultrasonido</option>
+                        <option value="SCANC_LINEAS">SCAN C — Líneas</option>
+                        <option value="SCANC_RP">SCAN C — Recipientes a Presión</option>
                       </select>
                     </div>
                     <div className="md:col-span-2">
@@ -407,6 +411,11 @@ function EquiposFisicosTab() {
   const categorias = useMemo(() => {
     if (!equipos) return [];
     return Array.from(new Set(equipos.map((e) => (e.categoria || "").trim()).filter(Boolean))).sort();
+  }, [equipos]);
+
+  const equiposUnicos = useMemo(() => {
+    if (!equipos) return [];
+    return Array.from(new Set(equipos.map((e) => (e.equipo || "").trim()).filter(Boolean))).sort();
   }, [equipos]);
 
   const filtered = useMemo(() => {
@@ -566,18 +575,22 @@ function EquiposFisicosTab() {
                 const proximaAVencer = hoyEsVencimientoProximo(valorCampo(e, "fechaVencimientoCalibracion"));
                 return (
                   <tr key={e.idEquipo} className={!e.activo ? "opacity-50" : ""}>
-                    <td className="px-1.5 py-1.5">
-                      <input
+                    <td className="px-1.5 py-1.5 min-w-[120px]">
+                      <ComboSelect
                         value={valorCampo(e, "categoria")}
-                        onChange={(ev) => setCampo(e.idEquipo, "categoria", ev.target.value)}
-                        className="w-28 rounded border border-transparent px-2 py-1 text-sm font-medium text-ink-800 outline-none hover:border-ink-200 focus:border-brand-600"
+                        options={categorias}
+                        onChange={(val) => setCampo(e.idEquipo, "categoria", val)}
+                        placeholder="Categoría..."
+                        className="w-full"
                       />
                     </td>
-                    <td className="px-1.5 py-1.5">
-                      <input
+                    <td className="px-1.5 py-1.5 min-w-[120px]">
+                      <ComboSelect
                         value={valorCampo(e, "equipo")}
-                        onChange={(ev) => setCampo(e.idEquipo, "equipo", ev.target.value)}
-                        className="w-28 rounded border border-transparent px-2 py-1 text-sm outline-none hover:border-ink-200 focus:border-brand-600"
+                        options={equiposUnicos}
+                        onChange={(val) => setCampo(e.idEquipo, "equipo", val)}
+                        placeholder="Equipo..."
+                        className="w-full"
                       />
                     </td>
                     <td className="px-1.5 py-1.5">
@@ -668,6 +681,8 @@ function EquiposFisicosTab() {
 
       {showNuevo && (
         <NuevoEquipoModal
+          categorias={categorias}
+          equiposUnicos={equiposUnicos}
           onClose={() => setShowNuevo(false)}
           onCreated={() => {
             setShowNuevo(false);
@@ -679,7 +694,17 @@ function EquiposFisicosTab() {
   );
 }
 
-function NuevoEquipoModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function NuevoEquipoModal({
+  categorias,
+  equiposUnicos,
+  onClose,
+  onCreated,
+}: {
+  categorias: string[];
+  equiposUnicos: string[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -721,11 +746,22 @@ function NuevoEquipoModal({ onClose, onCreated }: { onClose: () => void; onCreat
         <div className="space-y-3 p-5">
           <div>
             <label className="mb-1 block text-xs font-medium text-ink-700">Categoría *</label>
-            <input
+            <ComboSelect
               value={form.categoria}
-              onChange={(e) => setForm((f) => ({ ...f, categoria: e.target.value }))}
+              options={categorias}
+              onChange={(val) => setForm((f) => ({ ...f, categoria: val }))}
               placeholder="Ej: MX2, PAUT VEO3, Espesores..."
-              className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
+              className="w-full rounded border border-ink-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-ink-700">Equipo</label>
+            <ComboSelect
+              value={form.equipo}
+              options={equiposUnicos}
+              onChange={(val) => setForm((f) => ({ ...f, equipo: val }))}
+              placeholder="Dejar vacío para usar categoría"
+              className="w-full rounded border border-ink-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
             />
           </div>
           <div>
@@ -821,6 +857,22 @@ function CertificadosTab() {
     return Array.from(new Set(certs.map((c) => (c.tecnica || "").trim()).filter(Boolean))).sort();
   }, [certs]);
 
+  const { nombresUnicos, nombreToCcMap } = useMemo(() => {
+    if (!certs) return { nombresUnicos: [], nombreToCcMap: {} as Record<string, string> };
+    const nameToCc: Record<string, string> = {};
+    for (const c of certs) {
+      const n = (c.nombre || "").trim();
+      const cc = (c.cc || "").trim();
+      if (n && cc && !nameToCc[n]) {
+        nameToCc[n] = cc;
+      }
+    }
+    return {
+      nombresUnicos: Array.from(new Set(certs.map((c) => (c.nombre || "").trim()).filter(Boolean))).sort(),
+      nombreToCcMap: nameToCc,
+    };
+  }, [certs]);
+
   const filtered = useMemo(() => {
     if (!certs) return [];
     const q = query.trim().toLowerCase();
@@ -839,10 +891,23 @@ function CertificadosTab() {
   }
 
   function setCampo(idCertificado: string, campo: keyof CertificadoEdit, valor: string) {
-    setEdits((prev) => ({
-      ...prev,
-      [idCertificado]: { ...prev[idCertificado], [campo]: valor } as CertificadoEdit,
-    }));
+    setEdits((prev) => {
+      const newEdits = { ...prev };
+      if (!newEdits[idCertificado]) {
+        newEdits[idCertificado] = {};
+      }
+      newEdits[idCertificado][campo] = valor;
+      
+      // Auto-fill CC si cambia el nombre y el nombre existe en el map
+      if (campo === "nombre") {
+        const trimmed = valor.trim();
+        if (nombreToCcMap[trimmed]) {
+          newEdits[idCertificado].cc = nombreToCcMap[trimmed];
+        }
+      }
+
+      return newEdits;
+    });
   }
 
   function esDirty(idCertificado: string): boolean {
@@ -966,11 +1031,13 @@ function CertificadosTab() {
                 const dirty = esDirty(c.idCertificado);
                 return (
                   <tr key={c.idCertificado}>
-                    <td className="px-1.5 py-1.5">
-                      <input
+                    <td className="px-1.5 py-1.5 min-w-[160px]">
+                      <ComboSelect
                         value={valorCampo(c, "nombre")}
-                        onChange={(ev) => setCampo(c.idCertificado, "nombre", ev.target.value)}
-                        className="w-36 rounded border border-transparent px-2 py-1 text-sm font-medium text-ink-800 outline-none hover:border-ink-200 focus:border-brand-600"
+                        options={nombresUnicos}
+                        onChange={(val) => setCampo(c.idCertificado, "nombre", val)}
+                        placeholder="Nombre..."
+                        className="w-full"
                       />
                     </td>
                     <td className="px-1.5 py-1.5">
@@ -1055,6 +1122,8 @@ function CertificadosTab() {
 
       {showNuevo && (
         <NuevoCertificadoModal
+          nombresUnicos={nombresUnicos}
+          nombreToCcMap={nombreToCcMap}
           onClose={() => setShowNuevo(false)}
           onCreated={() => {
             setShowNuevo(false);
@@ -1066,7 +1135,17 @@ function CertificadosTab() {
   );
 }
 
-function NuevoCertificadoModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function NuevoCertificadoModal({
+  nombresUnicos,
+  nombreToCcMap,
+  onClose,
+  onCreated,
+}: {
+  nombresUnicos: string[];
+  nombreToCcMap: Record<string, string>;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<NewPersonalCertificadoPayload>({
@@ -1108,10 +1187,19 @@ function NuevoCertificadoModal({ onClose, onCreated }: { onClose: () => void; on
         <div className="space-y-3 p-5">
           <div>
             <label className="mb-1 block text-xs font-medium text-ink-700">Nombre *</label>
-            <input
+            <ComboSelect
               value={form.nombre}
-              onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
-              className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
+              options={nombresUnicos}
+              onChange={(val) => {
+                const trimmed = val.trim();
+                setForm((f) => ({
+                  ...f,
+                  nombre: val,
+                  cc: nombreToCcMap[trimmed] || f.cc, // Auto-fill si existe
+                }));
+              }}
+              placeholder="Nombre del personal..."
+              className="w-full rounded border border-ink-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
             />
           </div>
           <div>

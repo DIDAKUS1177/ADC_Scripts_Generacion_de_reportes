@@ -143,6 +143,36 @@ class ReportEngine:
    ```
 4. **Fórmulas de la plantilla:** load_workbook SIN `data_only=True` (se necesitan
    las fórmulas vivas).
+5. **`column_dimensions`/`row_dimensions` son `defaultdict`: LEER con `[...]` puede
+   escribir en la hoja.** `ws.column_dimensions[letra]`, para una columna SIN ancho
+   explícito, no lanza `KeyError` ni devuelve `None` — CREA un `ColumnDimension`
+   nuevo y lo deja guardado en la hoja. Ese objeto nuevo trae **`width=13.0` por
+   defecto (no `None`)**. O sea: la sola LECTURA del ancho, para calcular otra cosa
+   (p. ej. el escalado de una imagen), fija un ancho de 13 en columnas que debían
+   quedarse con el ancho por defecto de la plantilla — y ese 13.0 se graba de verdad
+   al guardar el `.xlsx`.
+   - **Bug real que causó esto (2026-07-09):** `insertar_imagen_centrada()`
+     (`image_utils.py`, compartida por los 4 motores: MT, PMI, 570, 510) leía así
+     el ancho de cada columna del rango de la imagen para calcular el escalado.
+     Como el reporte PMI inserta ~14 imágenes en rangos anchos (fotos, gráfico de
+     durezas, firmas), terminaba "pisando" con 13.0 casi todas las columnas del
+     reporte generado. El usuario lo reportó como "las columnas siguen aumentando
+     su tamaño" — se confirmó comparando con openpyxl la plantilla (columnas C:AG
+     sin ancho explícito) contra un .xlsx recién generado (las mismas columnas en
+     13.0 exacto).
+   - `row_dimensions[fila]` tiene el mismo comportamiento `defaultdict`, pero su
+     default es inofensivo (`height=None`, `customHeight=False` — no pisa nada al
+     guardar). El bug real es específico de `column_dimensions` por su default de
+     13.0.
+   - **Regla:** para LEER un ancho/alto sin riesgo de mutar la hoja, usar siempre
+     `.get(letra_o_fila)` (devuelve `None` si no existe, sin crear nada — `.get()`
+     no dispara `__missing__` del defaultdict). Reservar `[...]` para cuando la
+     intención es escribir (`ws.column_dimensions[letra].width = 20`).
+     ```python
+     def _ancho_columna(ws, letra: str) -> float:
+         dim = ws.column_dimensions.get(letra)
+         return dim.width if dim and dim.width else 8.43
+     ```
 
 ## Paso 4.4 — Imágenes flotantes centradas (traducción del fix GAS)
 
@@ -154,10 +184,13 @@ from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
 from openpyxl.utils.units import pixels_to_EMU, cm_to_EMU
 from PIL import Image as PILImage
 
-# 1. Área del rango en píxeles:
-#    ancho_col_px ≈ ws.column_dimensions[letra].width * 7  (aprox 7 px/unidad)
-#    alto_fila_px ≈ ws.row_dimensions[n].height * 96/72   (puntos → píxeles)
-#    Si la dimensión es None, usar defaults: width=8.43, height=15.
+# 1. Área del rango en píxeles — LEER SIEMPRE con `.get()`, nunca con `[...]`
+#    (ver bug #5 de la sección anterior: `[...]` en una columna sin ancho
+#    explícito graba width=13.0 en la hoja como efecto secundario de leerla):
+#    dim_col = ws.column_dimensions.get(letra)       # None si no existe
+#    ancho_col_px ≈ (dim_col.width if dim_col and dim_col.width else 8.43) * 7 + 5
+#    dim_fila = ws.row_dimensions.get(n)              # None si no existe
+#    alto_fila_px ≈ (dim_fila.height if dim_fila and dim_fila.height else 15) * 96/72
 # 2. Escala = min(area_w/img_w, area_h/img_h) con margen de 4 px.
 # 3. Centrado (mismo cálculo que el fix GAS):
 #    offset_x = max(0, (area_w - final_w) // 2)
@@ -169,6 +202,17 @@ from PIL import Image as PILImage
 ⚠️ El cálculo de píxeles de columnas de openpyxl es aproximado. Tras implementar,
 generar un reporte de prueba, abrirlo en Excel y ajustar el factor si las imágenes
 se ven descuadradas. Documentar el factor final en el código.
+
+✅ Ya resueltos y documentados en `image_utils.py` (`insertar_imagen_centrada`,
+`_ancho_columna`, `_alto_fila`) — no reabrir sin evidencia nueva:
+- Factor de conversión de ancho: `width * 7 + 5`, no `width * 7` (corregido 2026-07-05).
+- Lectura de `column_dimensions`/`row_dimensions` con `.get()`, no `[...]` (bug #5,
+  corregido 2026-07-09).
+- `fitToPage` de PMI/570/510 debe quedar en `True` (el valor que trae la plantilla).
+  Un intento anterior de desactivarlo (2026-07-06, basado en una prueba con
+  LibreOffice --headless) causó que el PMI paginara a 126 hojas al imprimir en
+  Excel real — revertido 2026-07-08. Si un renderizador muestra imágenes
+  desbordadas, sospechar primero del renderizador antes de tocar `fitToPage`.
 
 ### Descarga de imágenes desde Drive
 

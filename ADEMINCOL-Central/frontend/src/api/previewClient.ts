@@ -39,6 +39,7 @@ export interface MtPreviewIndicacion {
 export interface MtPreviewFoto {
   url: string;
   descripcion: string;
+  seccion?: string; // solo viene poblado en 570/510, que tienen múltiples secciones
 }
 
 export interface MtPreviewDetail extends MtPreviewItem {
@@ -218,6 +219,224 @@ export async function fetchReal510InspectionDetail(pvid: string): Promise<Sh510P
   return res.json();
 }
 
+// ---- APP009 Piernas Muertas UT — jerarquía Sistema -> PM, DISTINTA de los
+// demás tipos (no es un listado plano). Sin OT, sin inspector/firma en el
+// Sheet (el GAS original nunca los escribe) y sin link_reporte (el estado
+// siempre es PENDIENTE, ver backend/app/main.py).
+
+export interface PiernasMuertasPreviewItem {
+  id: string;
+  reportType: "PIERNAS_MUERTAS";
+  idInforme: string;
+  cliente: string | null;
+  fecha: string | null;
+  reporteN: string | null;
+  workOrderNumero: string | null;
+  estadoReporte: "GENERADO" | "PENDIENTE";
+  sistema: string | null;
+  idSistema: string | null;
+  inspector: string | null;
+}
+
+export interface PiernasMuertasPreviewDetail extends PiernasMuertasPreviewItem {
+  datosGenerales: Record<string, string | null>;
+  secciones: Sh570SeccionResumen[];
+  totalFotos: number;
+  fotos: MtPreviewFoto[];
+}
+
+export async function fetchRealPiernasMuertasInspections(): Promise<PiernasMuertasPreviewItem[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/piernas_muertas`);
+  if (!res.ok) {
+    throw new PreviewApiError(
+      "No se pudo conectar con el backend de preview. ¿Está corriendo en el puerto 8000?"
+    );
+  }
+  return res.json();
+}
+
+export async function fetchRealPiernasMuertasInspectionDetail(
+  idPm: string
+): Promise<PiernasMuertasPreviewDetail> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/piernas_muertas/${encodeURIComponent(idPm)}`);
+  if (!res.ok) {
+    throw new PreviewApiError("No se pudo cargar el detalle real de este PM.");
+  }
+  return res.json();
+}
+
+// ---- APP015 Insp ACFM — 2 secciones (datosACFM con fotos propias +
+// fotosGenerales, un segundo bloque de fotos sin datos propios, ancladas a
+// la fila general). A diferencia de Piernas Muertas, SÍ tiene OT, inspector
+// y link_reporte reales en el Sheet.
+
+export interface AcfmPreviewItem {
+  id: string;
+  reportType: "ACFM";
+  idInforme: string;
+  cliente: string | null;
+  fecha: string | null;
+  reporteN: string | null;
+  workOrderNumero: string | null;
+  estadoReporte: "GENERADO" | "PENDIENTE";
+  sistema: string | null;
+  inspector: string | null;
+}
+
+export interface AcfmPreviewDetail extends AcfmPreviewItem {
+  datosGenerales: Record<string, string | null>;
+  secciones: Sh570SeccionResumen[];
+  totalFotos: number;
+  fotos: MtPreviewFoto[];
+}
+
+export async function fetchRealAcfmInspections(): Promise<AcfmPreviewItem[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/acfm`);
+  if (!res.ok) {
+    throw new PreviewApiError(
+      "No se pudo conectar con el backend de preview. ¿Está corriendo en el puerto 8000?"
+    );
+  }
+  return res.json();
+}
+
+export async function fetchRealAcfmInspectionDetail(idGeneral: string): Promise<AcfmPreviewDetail> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/acfm/${encodeURIComponent(idGeneral)}`);
+  if (!res.ok) {
+    throw new PreviewApiError("No se pudo cargar el detalle real de esta inspección.");
+  }
+  return res.json();
+}
+
+// ---- Medición de Espesores (UT) — igual que 570/510, `ot` es texto libre.
+// A diferencia de 570/510 no hay secciones: UNA sola tabla de lecturas.
+
+export interface EspesoresPreviewItem {
+  id: string;
+  reportType: "ESPESORES";
+  idInforme: string;
+  cliente: string | null;
+  fecha: string | null;
+  reporteN: string | null;
+  workOrderNumero: string | null;
+  estadoReporte: "GENERADO" | "PENDIENTE";
+  sistema: string | null;
+  inspector: string | null;
+}
+
+export interface EspesoresLectura {
+  item: string;
+  componente: string;
+  cml: string;
+  diametro: string;
+  t_nominal: string;
+  observaciones: string;
+  [medicion: string]: string; // med1..med16
+}
+
+export interface EspesoresPreviewDetail extends EspesoresPreviewItem {
+  datosGenerales: Record<string, string | null>;
+  lecturas: EspesoresLectura[];
+  totalLecturas: number;
+  fotos: MtPreviewFoto[];
+  totalFotos: number;
+}
+
+export async function fetchRealEspesoresInspections(): Promise<EspesoresPreviewItem[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/espesores`);
+  if (!res.ok) {
+    throw new PreviewApiError(
+      "No se pudo conectar con el backend de preview. ¿Está corriendo en el puerto 8000?"
+    );
+  }
+  return res.json();
+}
+
+export async function fetchRealEspesoresInspectionDetail(idGeneral: string): Promise<EspesoresPreviewDetail> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/espesores/${encodeURIComponent(idGeneral)}`);
+  if (!res.ok) {
+    throw new PreviewApiError("No se pudo cargar el detalle real de esta inspección.");
+  }
+  return res.json();
+}
+
+// ---- SCAN C (Ultrasonido C-Scan) — dos variantes reales (líneas y
+// recipientes a presión), MISMA forma de datos, cada una con su propio
+// spreadsheet. Dos tablas de datos (reporte_datos, ensayo_datos) + fotos,
+// a diferencia de Espesores que solo tiene una tabla.
+
+export type ScancVariante = "scanc_lineas" | "scanc_rp";
+
+export interface ScancPreviewItem {
+  id: string;
+  reportType: "SCANC_LINEAS" | "SCANC_RP";
+  idInforme: string;
+  cliente: string | null;
+  fecha: string | null;
+  reporteN: string | null;
+  workOrderNumero: string | null;
+  estadoReporte: "GENERADO" | "PENDIENTE";
+  sistema: string | null;
+  inspector: string | null;
+}
+
+export interface ScancReporteDato {
+  id_punto: string;
+  sistema_o_linea: string;
+  cml: string;
+  diametro_in: string;
+  tipo_accesorio: string;
+  tipo_evaluacion: string;
+  espesor_nominal_mm: string;
+  espesor_promedio_mm: string;
+  espesor_minimo_mm: string;
+  perdida_basada_en_minimo: string;
+  perdida_basada_en_promedio: string;
+  observaciones: string;
+  [campo: string]: string;
+}
+
+export interface ScancEnsayoDato {
+  id_punto: string;
+  cml: string;
+  diametro_in: string;
+  tipo_anomalia: string;
+  porcentaje_perdida: string;
+  observaciones: string;
+  [campo: string]: string;
+}
+
+export interface ScancPreviewDetail extends ScancPreviewItem {
+  datosGenerales: Record<string, string | null>;
+  reporteDatos: ScancReporteDato[];
+  totalReporteDatos: number;
+  ensayoDatos: ScancEnsayoDato[];
+  totalEnsayoDatos: number;
+  fotos: MtPreviewFoto[];
+  totalFotos: number;
+}
+
+export async function fetchRealScancInspections(variante: ScancVariante): Promise<ScancPreviewItem[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/${variante}`);
+  if (!res.ok) {
+    throw new PreviewApiError(
+      "No se pudo conectar con el backend de preview. ¿Está corriendo en el puerto 8000?"
+    );
+  }
+  return res.json();
+}
+
+export async function fetchRealScancInspectionDetail(
+  variante: ScancVariante,
+  idGeneral: string
+): Promise<ScancPreviewDetail> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/${variante}/${encodeURIComponent(idGeneral)}`);
+  if (!res.ok) {
+    throw new PreviewApiError("No se pudo cargar el detalle real de esta inspección.");
+  }
+  return res.json();
+}
+
 async function leerDetalleError(res: Response, fallback: string): Promise<string> {
   try {
     const body = await res.json();
@@ -244,7 +463,92 @@ export interface JobStatus {
   detalleLote: BatchDetalleItem[];
 }
 
-export type ReportKind = "mt" | "pmi" | "570" | "510";
+export type ReportKind = "mt" | "pmi" | "570" | "510" | "espesores" | "scanc_lineas" | "scanc_rp" | "piernas_muertas" | "acfm";
+
+// ---- Sincronización real Sheets -> Postgres (2026-07-09) — reemplaza el
+// mock que había en mock/client.ts (runSync generaba un número aleatorio,
+// nunca tocaba nada real). Cubre las 7 tablas de soporte, ver sync_service.py.
+
+export interface SyncRun {
+  id: number;
+  status: "SUCCESS" | "ERROR" | "RUNNING";
+  startedAt: string;
+  finishedAt: string | null;
+  rowsUpserted: number;
+  errorDetail: string | null;
+  detalle: Record<string, number | string>;
+}
+
+export interface SyncResultado {
+  detalle: Record<string, number | string>;
+  totalFilas: number;
+  huboError: boolean;
+}
+
+export async function fetchSyncRunsReal(): Promise<SyncRun[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/sync/runs`);
+  if (!res.ok) throw new PreviewApiError("No se pudo cargar el historial de sincronización.");
+  return res.json();
+}
+
+export async function runSyncReal(): Promise<SyncResultado> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/sync`, { method: "POST" });
+  if (!res.ok) throw new PreviewApiError("No se pudo ejecutar la sincronización.");
+  return res.json();
+}
+
+// ---- Exportación de la BD a Excel (solo ADMINISTRADOR, 2026-07-09).
+// Cada tabla es una hoja del .xlsx; se pueden seleccionar filas por ID.
+
+export interface AdminTablaMeta {
+  key: string;
+  label: string;
+  grupo: string; // "General" | "PMI" | ... — el backend decide los grupos, ver admin_export.py
+  idColumn: string;
+  columnas: string[];
+  totalFilas: number;
+}
+
+export interface AdminTablaDatos extends AdminTablaMeta {
+  filas: Record<string, string | number | boolean | null>[];
+}
+
+export interface ExportSeleccion {
+  key: string;
+  ids?: string[]; // vacío/ausente = todas las filas de esa tabla
+}
+
+export async function fetchAdminTablas(): Promise<AdminTablaMeta[]> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/admin/tablas`);
+  if (!res.ok) throw new PreviewApiError("No se pudo cargar la lista de tablas.");
+  return res.json();
+}
+
+export async function fetchAdminTablaDatos(key: string): Promise<AdminTablaDatos> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/admin/tabla/${encodeURIComponent(key)}`);
+  if (!res.ok) throw new PreviewApiError("No se pudo cargar la tabla.");
+  return res.json();
+}
+
+export async function exportarBD(tablas: ExportSeleccion[]): Promise<void> {
+  const res = await fetch(`${PREVIEW_API_BASE}/api/preview/admin/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tablas }),
+  });
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo generar el Excel."));
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const cd = res.headers.get("Content-Disposition") || "";
+  const match = cd.match(/filename="?([^"]+)"?/);
+  a.download = match ? match[1] : "ADEMINCOL_BD.xlsx";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 export async function startReportJob(
   tipo: ReportKind,
@@ -341,7 +645,7 @@ export interface RealUser {
   createdAt: string | null;
 }
 
-export type Tecnica = "MT" | "PMI" | "570" | "510";
+export type Tecnica = "MT" | "PMI" | "570" | "510" | "ESPESORES" | "SCANC_LINEAS" | "SCANC_RP" | "PIERNAS_MUERTAS" | "ACFM";
 
 export interface UserCertificate {
   idCertificado?: string;
@@ -387,6 +691,27 @@ export async function toggleRealUserActive(usuario: string, activo: boolean): Pr
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ activo }),
+    }
+  );
+  if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo actualizar el usuario."));
+}
+
+export interface UpdateUserPayload {
+  nombre?: string;
+  correo?: string;
+  rol?: string;
+  cargo?: string;
+  certificado?: string;
+  newPassword?: string;
+}
+
+export async function updateRealUser(usuario: string, payload: UpdateUserPayload): Promise<void> {
+  const res = await fetch(
+    `${PREVIEW_API_BASE}/api/preview/usuarios/${encodeURIComponent(usuario)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     }
   );
   if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo actualizar el usuario."));
@@ -537,6 +862,8 @@ export interface RealDashboardData {
   serviciosPendientes: number;
   certificadosPorVencer: DashboardCertificadoPorVencer[];
   reportesPorTipo: Record<string, DashboardReporteTipo>;
+  serviciosPorSupervisor: Record<string, Record<string, number>>;
+  reportesPorInspector: Record<string, Record<string, number>>;
   misOts?: DashboardMiOt[];
   misServicios?: DashboardMiServicio[];
   misCertificadosPorVencer?: DashboardCertificadoPorVencer[];

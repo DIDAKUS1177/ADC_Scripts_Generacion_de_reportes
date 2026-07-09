@@ -50,6 +50,42 @@ HOJA_570_GENERAL = "#1_informaciongeneral"
 SHEET_510_DATOS_ID = "1RTgmI6Ftwuf3b00ELIgnQZrBvbN3Jiw36HBCAbTWuwY"
 SHEET_510_FOTOS_ID = "1i_pHG65ljg5NidkQa_n611PPSOmVcmNUNZ4mY-mqrpI"
 HOJA_510_GENERAL = "0.pv_general"
+# Medición de Espesores (UT). Hoja general/activadora: '1_general'
+# (id_general). UNA sola tabla dinámica de lecturas ('2_lecturas_tomadas') +
+# fotos ('3_fotografias') — a diferencia de 570/510 no hay secciones, ver
+# report_engine_espesores.py. `ot` también es texto libre.
+SHEET_ESPESORES_ID = "18pN681sIIu3rT6gO_MDfDFr9OZkOaFpAOPfQxooJpXk"
+HOJA_ESPESORES_GENERAL = "1_general"
+HOJA_ESPESORES_LECTURAS = "2_lecturas_tomadas"
+HOJA_ESPESORES_FOTOS = "3_fotografias"
+# SCAN C (Ultrasonido C-Scan) — dos variantes reales con la misma estructura
+# de hojas, ver report_engine_scanc.py. NO se hizo "tanques" (pedido
+# explícito del usuario 2026-07-09, solo líneas y recipientes a presión).
+SHEET_SCANC_LINEAS_ID = "1GXzQAjEK2s0MrM-IundNq2NwCghYZPdhoxA405mHTRg"
+SHEET_SCANC_RP_ID = "1Azx0v3Ur4oEockTDuC-FStnmK_HLLq6sY3FF9NePfg8"
+HOJA_SCANC_GENERAL = "1.0_general"
+HOJA_SCANC_REPORTE_DATOS = "2.0_reporte"
+HOJA_SCANC_ENSAYO_DATOS = "2.1_ensayo"
+HOJA_SCANC_FOTOS = "2.0_reporte_photos"
+# APP009 Piernas Muertas UT — jerarquía Sistema -> PM (a diferencia de
+# MT/570/510/Espesores/SCAN C, que son planos por id_informe). Hoja
+# '0_sistema' agrupa por sistema; '1_general' tiene un id_pm por pierna
+# muerta. 3 secciones (inspeccion/radiografia/espesores), solo 2 tienen
+# fotos — ver report_engine_piernas_muertas.py. Sin OT, sin firma, sin
+# link_reporte en el Sheet (verificado 2026-07-09 contra datos reales).
+SHEET_PIERNAS_MUERTAS_ID = "1M0Kv_rdvNNVREI3cjDrvW08cBgir4TR_h7lR1rUP0gE"
+HOJA_PM_SISTEMAS = "0_sistema"
+HOJA_PM_GENERAL = "1_general"
+# APP015 Insp ACFM (ReporteACFM.gs, aportado por el usuario 2026-07-09 — el
+# script que había en la carpeta del proyecto era un stub sin lógica real).
+# A diferencia de Piernas Muertas, SÍ tiene link_reporte (columna real en
+# '1.0_general') y solo 1 fila de capacidad por sección en la plantilla, no
+# 2 — ver report_engine_acfm.py.
+SHEET_ACFM_ID = "1FCSmWeYjO6u3_jFNmAJwsLc0O4bb1WqPjkdGL-1g88Q"
+HOJA_ACFM_GENERAL = "1.0_general"
+HOJA_ACFM_DATOS = "1.1_reporte_datos"
+HOJA_ACFM_DATOS_FOTOS = "1.1_reporte_datos_PHOTOS"
+HOJA_ACFM_GENERAL_FOTOS = "1.1_general_PHOTOS"
 # BD temporal usuarios/work_orders creada con sheets-db/CrearHojasBD.gs
 BD_SPREADSHEET_ID = "1HVGz6v06ML1Ohg3z6n8HS_97etWChev7fkwDgEPOIMo"
 

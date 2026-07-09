@@ -16,6 +16,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import coordinate_from_string
 
 from .image_utils import descargar_imagen, insertar_imagen_centrada
+from .report_utils import valor_tipado
 
 logger = logging.getLogger("report_engine_mt")
 
@@ -205,17 +206,17 @@ def generar_reporte_mt(
         valor = fila_general.get(campo)
         if valor:
             col, fila = coordinate_from_string(celda)
-            ws[f"{col}{fila_final(fila)}"] = valor
+            ws[f"{col}{fila_final(fila)}"] = valor_tipado(valor)
 
     for idx, res in enumerate(resultados):
         fila_actual = FILA_INICIO_INSPECCION + idx
         for campo, col in COLUMNAS_RESULTADO.items():
-            ws[f"{col}{fila_actual}"] = res.get(campo, "")
+            ws[f"{col}{fila_actual}"] = valor_tipado(res.get(campo, ""))
         inds = [i for i in indicaciones if i.get("id_resultado") == res.get("item")]
         for i, (col_tipo, col_long) in enumerate(COLUMNAS_INDICACIONES):
             if i < len(inds):
-                ws[f"{col_tipo}{fila_actual}"] = inds[i].get("tipo", "")
-                ws[f"{col_long}{fila_actual}"] = inds[i].get("long", "")
+                ws[f"{col_tipo}{fila_actual}"] = valor_tipado(inds[i].get("tipo", ""))
+                ws[f"{col_long}{fila_actual}"] = valor_tipado(inds[i].get("long", ""))
 
     fila_foto_por_indice: list[tuple[int, int]] = []  # (fila, columna_letra) por foto, para las imágenes
     for idx, foto in enumerate(fotos):

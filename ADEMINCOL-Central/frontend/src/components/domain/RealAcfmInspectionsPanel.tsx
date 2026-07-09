@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Eye, ImageIcon, Layers, PencilLine } from "lucide-react";
 import {
   downloadJobResult,
-  fetchReal510InspectionDetail,
-  fetchReal510Inspections,
+  fetchRealAcfmInspectionDetail,
+  fetchRealAcfmInspections,
   getJobStatus,
   startReportJob,
   PreviewApiError,
-  type Sh510PreviewDetail,
-  type Sh510PreviewItem,
+  type AcfmPreviewDetail,
+  type AcfmPreviewItem,
 } from "../../api/previewClient";
 import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
@@ -17,30 +17,30 @@ import { useBatchGeneration } from "./useBatchGeneration";
 import { BatchGenerationStatus } from "./BatchGenerationStatus";
 import { FotosPorSeccion } from "./FotosPorSeccion";
 
-// Panel de datos REALES de API 510 (Inspección Visual de Recipientes a
-// Presión). Igual patrón que Real570InspectionsPanel: resumen de secciones
-// en vez de mostrar cada registro. Diferencia interna (no visible aquí):
-// datos y fotos viven en dos Google Sheets separados — el backend ya lo
-// resuelve.
-export function Real510InspectionsPanel() {
+// Panel de datos REALES de APP015 Insp ACFM. 2 secciones: "datosACFM" (con
+// fotos propias) y "fotosGenerales" (un segundo bloque de fotos SIN datos
+// propios, ancladas a la fila general) — ver report_engine_acfm.py.
+// A diferencia de Piernas Muertas, sí tiene OT/inspector/link_reporte
+// reales en el Sheet, así que sigue el mismo patrón que 570/510.
+export function RealAcfmInspectionsPanel() {
   const toast = useToast();
-  const [items, setItems] = useState<Sh510PreviewItem[] | null>(null);
+  const [items, setItems] = useState<AcfmPreviewItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<Sh510PreviewDetail | null>(null);
+  const [detail, setDetail] = useState<AcfmPreviewDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [job, setJob] = useState<{ pct: number; etapa: string } | null>(null);
   const pollRef = useRef<number | null>(null);
   const [query, setQuery] = useState("");
-  const batchGen = useBatchGeneration("510");
+  const batchGen = useBatchGeneration("acfm");
 
   const filtered = useMemo(() => {
     if (!items) return null;
     const q = query.trim().toLowerCase();
     if (!q) return items;
     return items.filter((it) =>
-      [it.idInforme, it.cliente, it.sistema, it.inspector, it.fecha, it.workOrderNumero]
+      [it.idInforme, it.cliente, it.workOrderNumero, it.sistema, it.inspector, it.fecha]
         .some((v) => String(v || "").toLowerCase().includes(q))
     );
   }, [items, query]);
@@ -48,7 +48,7 @@ export function Real510InspectionsPanel() {
   function load() {
     setError(null);
     setItems(null);
-    fetchReal510Inspections()
+    fetchRealAcfmInspections()
       .then(setItems)
       .catch((e) => setError(e instanceof Error ? e.message : "Error desconocido"));
   }
@@ -60,12 +60,12 @@ export function Real510InspectionsPanel() {
     };
   }, []);
 
-  function openDetail(pvid: string) {
-    setSelected(pvid);
+  function openDetail(idGeneral: string) {
+    setSelected(idGeneral);
     setDetail(null);
     setDetailError(null);
     setEdits({});
-    fetchReal510InspectionDetail(pvid)
+    fetchRealAcfmInspectionDetail(idGeneral)
       .then(setDetail)
       .catch((e) => setDetailError(e instanceof Error ? e.message : "Error desconocido"));
   }
@@ -74,7 +74,7 @@ export function Real510InspectionsPanel() {
     if (!selected || job) return;
     setJob({ pct: 0, etapa: "Iniciando..." });
     try {
-      const jobId = await startReportJob("510", selected, edits);
+      const jobId = await startReportJob("acfm", selected, edits);
       pollRef.current = window.setInterval(async () => {
         try {
           const status = await getJobStatus(jobId);
@@ -86,7 +86,7 @@ export function Real510InspectionsPanel() {
           pollRef.current = null;
           if (status.estado === "DONE") {
             setJob({ pct: 100, etapa: "Descargando..." });
-            await downloadJobResult(jobId, "510", selected);
+            await downloadJobResult(jobId, "acfm", selected);
             toast.success("Reporte generado y descargado.");
             status.warnings.forEach((w) => toast.error(`⚠️ ${w}`));
           } else {
@@ -109,9 +109,7 @@ export function Real510InspectionsPanel() {
   if (items === null && !error) return <Spinner label="Cargando informes..." />;
   if (error) return <ErrorState message={error} onRetry={load} />;
   if (items !== null && items.length === 0) {
-    return (
-      <EmptyState title="Sin informes" description="La hoja 0.pv_general no tiene pvid con datos." />
-    );
+    return <EmptyState title="Sin informes" description="La hoja 1.0_general no tiene id_general con datos." />;
   }
 
   return (
@@ -121,7 +119,7 @@ export function Real510InspectionsPanel() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por ID, cliente, tag, inspector, fecha..."
+            placeholder="Buscar por ID, cliente, OT, sistema, fecha..."
             className="w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
           />
         </div>
@@ -163,7 +161,7 @@ export function Real510InspectionsPanel() {
                 <th className="px-4 py-2.5">ID Informe</th>
                 <th className="px-4 py-2.5">Cliente</th>
                 <th className="px-4 py-2.5">Fecha</th>
-                <th className="px-4 py-2.5">Tag</th>
+                <th className="px-4 py-2.5">OT</th>
                 <th className="px-4 py-2.5">Estado</th>
                 <th className="px-4 py-2.5"></th>
               </tr>
@@ -190,8 +188,8 @@ export function Real510InspectionsPanel() {
                     {it.cliente ?? "-"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5 text-ink-600">{it.fecha ?? "-"}</td>
-                  <td className="px-4 py-2.5 max-w-[140px] truncate text-ink-600" title={it.sistema ?? ""}>
-                    {it.sistema ?? "-"}
+                  <td className="px-4 py-2.5 max-w-[140px] truncate text-ink-600" title={it.workOrderNumero ?? ""}>
+                    {it.workOrderNumero ?? "-"}
                   </td>
                   <td className="px-4 py-2.5">
                     <Badge tone={it.estadoReporte === "GENERADO" ? "green" : "gray"}>
@@ -214,7 +212,7 @@ export function Real510InspectionsPanel() {
             Selecciona un informe de la lista para ver sus datos reales.
           </p>
         )}
-        {selected && !detail && !detailError && <Spinner label="Cargando detalle (11 secciones)..." />}
+        {selected && !detail && !detailError && <Spinner label="Cargando detalle..." />}
         {detailError && <ErrorState message={detailError} />}
         {detail && (
           <div>
@@ -222,7 +220,7 @@ export function Real510InspectionsPanel() {
               <div>
                 <p className="font-mono text-sm font-bold text-ink-900">{detail.idInforme}</p>
                 <p className="text-xs text-ink-400">
-                  {detail.cliente} · {detail.fecha || "sin fecha"} · Tag: {detail.sistema || "-"}
+                  {detail.cliente} · {detail.fecha || "sin fecha"} · OT: {detail.workOrderNumero || "sin OT"}
                 </p>
               </div>
               {!job && (
@@ -275,17 +273,17 @@ export function Real510InspectionsPanel() {
             </div>
 
             <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-400">
-              <ImageIcon size={12} /> Secciones ({detail.secciones.filter((s) => s.registros > 0).length} con datos · {detail.totalFotos} fotos totales)
+              <ImageIcon size={12} /> Secciones ({detail.secciones.filter((s) => s.registros > 0 || s.fotos > 0).length} con datos · {detail.totalFotos} fotos totales)
             </p>
             <div className="space-y-1">
               {detail.secciones.map((s) => (
                 <div
                   key={s.key}
                   className={`flex items-center justify-between rounded-lg px-3 py-1.5 text-xs ${
-                    s.registros > 0 ? "bg-ink-50" : "bg-ink-50/40 text-ink-400"
+                    s.registros > 0 || s.fotos > 0 ? "bg-ink-50" : "bg-ink-50/40 text-ink-400"
                   }`}
                 >
-                  <span className="font-medium">{s.sheet.replace(/^\d+\./, "").replace(/_/g, " ")}</span>
+                  <span className="font-medium capitalize">{s.key}</span>
                   <span>
                     {s.registros} registro{s.registros !== 1 ? "s" : ""} · {s.fotos} foto{s.fotos !== 1 ? "s" : ""}
                   </span>

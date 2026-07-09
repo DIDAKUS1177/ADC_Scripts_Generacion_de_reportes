@@ -1,10 +1,28 @@
 import { useEffect, useState } from "react";
 import { ClipboardList, FileCheck2, Clock3, Users, AlertTriangle, Wrench } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid,
+} from "recharts";
 import { useAuth } from "../context/AuthContext";
 import { fetchRealDashboard, type RealDashboardData } from "../api/previewClient";
 import { Spinner, ErrorState } from "../components/ui/States";
 import { Badge } from "../components/ui/Badge";
 import { ROLE_LABEL } from "../components/layout/navConfig";
+
+// Paleta ADEMINCOL para las técnicas
+const TECNICA_COLORS: Record<string, string> = {
+  MT: "#dc2626",       // brand red
+  PMI: "#0284c7",      // sky-600
+  "570": "#059669",    // emerald-600
+  "510": "#d97706",    // amber-600
+  ESPESORES: "#7c3aed", // violet-600
+  SCANC_LINEAS: "#0891b2", // cyan-600
+  SCANC_RP: "#be185d",     // pink-700
+};
+
+function colorParaTecnica(tecnica: string): string {
+  return TECNICA_COLORS[tecnica] || "#6b7280";
+}
 
 // Dashboard con datos REALES (BD Sheets + Sheets de MT/PMI/570), diferenciado
 // por rol — ver decisión reunión 2026-07-03 ("mejora ese dashboard, ajustado
@@ -44,10 +62,35 @@ export function DashboardPage() {
   );
 }
 
+// ---- Helpers para transformar datos cruzados en formato recharts ----
+
+function buildGroupedBarData(
+  dataMap: Record<string, Record<string, number>>
+): { chartData: Array<Record<string, string | number>>; tecnicas: string[] } {
+  const tecnicasSet = new Set<string>();
+  for (const sub of Object.values(dataMap)) {
+    for (const t of Object.keys(sub)) tecnicasSet.add(t);
+  }
+  const tecnicas = Array.from(tecnicasSet).sort();
+
+  const chartData = Object.entries(dataMap).map(([name, tecMap]) => {
+    const entry: Record<string, string | number> = { name };
+    for (const t of tecnicas) {
+      entry[t] = tecMap[t] || 0;
+    }
+    return entry;
+  });
+
+  return { chartData, tecnicas };
+}
+
 // ---- ADMINISTRADOR: visión global del negocio ("los activos") ----
 function AdminDashboard({ data }: { data: RealDashboardData }) {
   const totalReportes = Object.values(data.reportesPorTipo).reduce((a, r) => a + r.total, 0);
   const totalGenerados = Object.values(data.reportesPorTipo).reduce((a, r) => a + r.generados, 0);
+
+  const supervisorChart = buildGroupedBarData(data.serviciosPorSupervisor ?? {});
+  const inspectorChart = buildGroupedBarData(data.reportesPorInspector ?? {});
 
   return (
     <div>
@@ -58,7 +101,41 @@ function AdminDashboard({ data }: { data: RealDashboardData }) {
         <StatCard icon={FileCheck2} label="Reportes generados" value={`${totalGenerados} / ${totalReportes}`} tone="green" />
       </div>
 
-      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {/* ---- El gráfico más importante: ancho completo, arriba de todo lo demás ---- */}
+      <div className="mt-8">
+        <Panel title="Reportes generados por inspector">
+          {inspectorChart.chartData.length === 0 ? (
+            <EmptyRow />
+          ) : (
+            <ResponsiveContainer width="100%" height={Math.max(240, inspectorChart.chartData.length * 42)}>
+              <BarChart
+                data={inspectorChart.chartData}
+                layout="vertical"
+                margin={{ top: 4, right: 20, left: 4, bottom: 4 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  width={160}
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={(v: string) => v.length > 24 ? v.slice(0, 22) + "…" : v}
+                />
+                <Tooltip
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                {inspectorChart.tecnicas.map((t) => (
+                  <Bar key={t} dataKey={t} fill={colorParaTecnica(t)} radius={[0, 4, 4, 0]} barSize={18} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Panel>
+      </div>
+
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel title="OTs por estado">
           {Object.entries(data.otsPorEstado).length === 0 ? (
             <EmptyRow />
@@ -100,6 +177,40 @@ function AdminDashboard({ data }: { data: RealDashboardData }) {
                 </div>
               ))}
             </div>
+          )}
+        </Panel>
+      </div>
+
+      {/* ---- Servicios abiertos por supervisor (segundo gráfico de barras) ---- */}
+      <div className="mt-6">
+        <Panel title="Servicios abiertos por supervisor">
+          {supervisorChart.chartData.length === 0 ? (
+            <EmptyRow />
+          ) : (
+            <ResponsiveContainer width="100%" height={Math.max(240, supervisorChart.chartData.length * 42)}>
+              <BarChart
+                data={supervisorChart.chartData}
+                layout="vertical"
+                margin={{ top: 4, right: 20, left: 4, bottom: 4 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  width={160}
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={(v: string) => v.length > 24 ? v.slice(0, 22) + "…" : v}
+                />
+                <Tooltip
+                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                {supervisorChart.tecnicas.map((t) => (
+                  <Bar key={t} dataKey={t} fill={colorParaTecnica(t)} radius={[0, 4, 4, 0]} barSize={18} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
           )}
         </Panel>
       </div>
@@ -173,7 +284,7 @@ function InspectorDashboard({ data }: { data: RealDashboardData }) {
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel title="Mis servicios asignados">
           {misServicios.length === 0 ? (
-            <p className="text-sm text-ink-400">Aún no tienes servicios autoasignados en AppSheet.</p>
+            <p className="text-sm text-ink-400">Aún no tienes servicios autoasignados.</p>
           ) : (
             <div className="space-y-1.5">
               {misServicios.map((s) => (
