@@ -24,7 +24,7 @@ from .report_utils import valor_tipado
 logger = logging.getLogger("report_engine_510")
 
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates_xlsx" / "510.xlsx"
-HOJA_FORMATO = "FORMATO_VISUAL"
+HOJA_FORMATO = "FORMATO"
 
 # Verificado contra los headers reales de '0.pv_general' (2026-07-03) — los
 # nombres de campo son distintos a los del script GAS original en algunos

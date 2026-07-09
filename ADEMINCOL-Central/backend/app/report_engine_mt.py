@@ -151,7 +151,7 @@ def generar_reporte_mt(
 
     _reportar(5, "Preparando plantilla")
     wb = load_workbook(TEMPLATE_PATH)
-    ws = wb["FORMATO_MT"]
+    ws = wb["FORMATO"]
 
     # ---- Fase 1: calcular cuántas filas extra hacen falta ----
     filas_extra_resultados = max(0, len(resultados) - 2)  # plantilla ya trae 2 filas (44-45)

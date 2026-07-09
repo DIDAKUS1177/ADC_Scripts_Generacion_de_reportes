@@ -28,7 +28,7 @@ from .report_utils import valor_tipado
 logger = logging.getLogger("report_engine_570")
 
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates_xlsx" / "570.xlsx"
-HOJA_FORMATO = "formato570"
+HOJA_FORMATO = "FORMATO"
 
 CELDAS_GENERALES = {
     "cliente": "I8", "consecutivo": "V8", "fecha": "AI8", "ubicacion": "AV8",

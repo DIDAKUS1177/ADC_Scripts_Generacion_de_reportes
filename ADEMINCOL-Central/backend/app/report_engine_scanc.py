@@ -12,7 +12,9 @@ del usuario, solo líneas y recipientes a presión por ahora.
 Plantillas: templates_xlsx/SCANC_LINEAS.xlsx y SCANC_RP.xlsx, ambas
 extraídas de la hoja real "FORMAT" de cada spreadsheet (exportando con las
 credenciales del service account, no hay Excel entregado a mano para este
-tipo — igual que 570/510/Espesores en su momento).
+tipo — igual que 570/510/Espesores en su momento). Renombrada a "FORMATO"
+en la plantilla local (2026-07-09, estandarización del nombre de hoja
+interna en los 9 templates_xlsx/*.xlsx — ver docs/07_CONTEXTO_MIGRACION_POSTGRES.md).
 
 Estructura confirmada en la plantilla real (idéntica en ambas variantes):
   - Datos generales: fila 7-15 (ver CELDAS_GENERALES).
@@ -38,7 +40,7 @@ from .report_utils import valor_tipado
 logger = logging.getLogger("report_engine_scanc")
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates_xlsx"
-HOJA_FORMATO = "FORMAT"
+HOJA_FORMATO = "FORMATO"
 
 # --- CELDAS_GENERALES traducido 1:1 de MAPEO_DE_CELDAS en cada script GAS ---
 # (2026-07-09, verificado contra la hoja real de cada spreadsheet — no son

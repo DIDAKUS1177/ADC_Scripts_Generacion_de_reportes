@@ -30,7 +30,7 @@ from .report_utils import valor_tipado
 logger = logging.getLogger("report_engine_espesores")
 
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates_xlsx" / "ESPESORES.xlsx"
-HOJA_FORMATO = "FORMATOS_SCAN_C"
+HOJA_FORMATO = "FORMATO"
 
 # Verificado celda por celda contra la plantilla real el 2026-07-09 (dump de
 # ws.merged_cells + texto de cada celda ancla). Dos correcciones sobre el

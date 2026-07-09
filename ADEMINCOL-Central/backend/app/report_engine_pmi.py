@@ -193,7 +193,7 @@ def generar_reporte_pmi(
 
     _reportar(5, "Preparando plantilla")
     wb = load_workbook(TEMPLATE_PATH)
-    ws = wb["FORMATO_MATERIALES"]
+    ws = wb["FORMATO"]
     desactivar_fit_to_page(ws)
 
     _reportar(15, "Escribiendo datos generales")

@@ -39,7 +39,7 @@ from .report_utils import valor_tipado
 logger = logging.getLogger("report_engine_piernas_muertas")
 
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates_xlsx" / "PIERNAS_MUERTAS.xlsx"
-HOJA_FORMATO = "formato"
+HOJA_FORMATO = "FORMATO"
 
 # Traducido literal de MAPEO_DE_CELDAS en APP009_Piernas_Muertas_UT.js
 CELDAS_GENERALES = {

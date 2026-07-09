@@ -231,6 +231,33 @@ datosACFM, 0 registros/11 fotos en fotosGenerales) y la generación real del
 .xlsx completa sin errores con 31 imágenes insertadas (28 fotos + esquema +
 registro + firma).
 
+## Estandarización del nombre de hoja interna en templates_xlsx (2026-07-09)
+
+Pedido explícito del usuario tras notar la inconsistencia: cada plantilla
+`.xlsx` de `backend/app/templates_xlsx/` tenía su hoja de formato con un
+nombre distinto — `FORMATO_MT`, `formato570` (minúscula), `FORMATO_VISUAL`,
+`FORMATO_MATERIALES`, `FORMAT` (SCAN C), `formato` (Piernas Muertas), y
+`FORMATO` (ACFM, la única ya correcta). Estandarizado a `"FORMATO"` en los
+9 archivos (renombrado con openpyxl, `ws.title = "FORMATO"`) y actualizada
+la constante `HOJA_FORMATO`/referencia directa en cada `report_engine_*.py`.
+
+**Bug real encontrado en el camino**: `ESPESORES.xlsx` tenía su hoja
+interna llamada `FORMATOS_SCAN_C` — resto de copiar/pegar de cuando se
+armó el motor de SCAN C a partir del de Espesores. No rompía nada (el
+código apuntaba al nombre exacto sin importar si tenía sentido), pero
+confundía a cualquiera que abriera el archivo a mano. Corregido de paso.
+
+**Gotcha de openpyxl encontrado**: al renombrar la única hoja de
+`PIERNAS_MUERTAS.xlsx` de `"formato"` a `"FORMATO"` en un solo `save()`,
+openpyxl la dejó como `"FORMATO1"` (colisión de nombre case-insensitive
+consigo misma durante el mismo `wb.save()`). Se resolvió con un segundo
+`load_workbook`/`save()` separado — el rename funciona bien cuando el
+nombre viejo y el nuevo no coexisten en la misma sesión de escritura.
+
+Verificado generando un reporte real de prueba para los 9 tipos (MT, PMI,
+570, 510, Espesores, SCAN C Líneas, SCAN C RP, Piernas Muertas, ACFM) tras
+el cambio — los 9 terminan `DONE` sin error.
+
 ## Widget flotante — mini-gráfico "Reportes generados por inspector" (2026-07-09)
 
 Pedido explícito del usuario: "en la parte izquierda como ventana flotante,
@@ -245,6 +272,20 @@ inspector y se muestran los 8 con más reportes — el espacio es angosto
 (`w-64`, fijo `left-3 top-1/2`) y desglosar por técnica no cabría legible.
 Colapsable a una pestaña angosta con flecha (botón "Ocultar"/"Mostrar
 reportes por inspector") para no tapar contenido de las páginas.
+
+**Ajustes 2026-07-09 (2ª pasada, pedido explícito)**: más alto (12
+inspectores en vez de 8, barras más gruesas) y con una sección nueva de
+"Servicios activos" debajo del gráfico — lista los servicios con
+`estado === "EN_CURSO"` (`fetchServicios()`, mismo criterio que el badge
+"En curso" de `WorkOrdersPage`), mostrando `idOt` + técnica. Se cambió el
+anclaje de `top-1/2 -translate-y-1/2` (centrado vertical) a `top-20` fijo
+con `max-h-[calc(100vh-6rem)]` y scroll interno — centrar verticalmente ya
+no funcionaba bien una vez que el contenido creció, se saldría del viewport
+en pantallas bajas. Verificado en navegador: el widget renderiza, colapsa y
+expande correctamente; la sección de servicios activos no aparece en los
+datos actuales porque los 2 servicios reales existentes están en
+`PENDIENTE` (ninguno `EN_CURSO` todavía) — comportamiento correcto del
+filtro, no falta nada por corregir.
 
 ## Pendiente (no resuelto, anotado para no perderlo)
 
