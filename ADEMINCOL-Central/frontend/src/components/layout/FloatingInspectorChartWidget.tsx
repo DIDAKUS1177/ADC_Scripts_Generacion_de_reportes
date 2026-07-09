@@ -47,7 +47,7 @@ export function FloatingInspectorChartWidget() {
       <button
         onClick={() => setCollapsed(false)}
         title="Mostrar reportes por inspector"
-        className="fixed left-0 top-20 z-40 flex items-center gap-1 rounded-r-lg border border-l-0 border-ink-200 bg-white px-2 py-3 text-ink-500 shadow-md hover:bg-ink-50"
+        className="fixed left-0 top-24 z-20 flex items-center gap-1 rounded-r-lg border border-l-0 border-ink-200 bg-white px-2 py-3 text-ink-500 shadow-md hover:bg-ink-50"
       >
         <BarChart3 size={16} />
         <ChevronRight size={14} />
@@ -56,7 +56,7 @@ export function FloatingInspectorChartWidget() {
   }
 
   return (
-    <div className="fixed left-3 top-20 z-40 flex max-h-[calc(100vh-6rem)] w-72 flex-col overflow-y-auto rounded-xl border border-ink-200 bg-white p-3 shadow-lg">
+    <div className="fixed left-3 top-24 z-20 flex max-h-[calc(100vh-7rem)] w-72 flex-col overflow-y-auto rounded-xl border border-ink-200 bg-white p-3 shadow-lg">
       <div className="mb-2 flex items-center justify-between">
         <p className="flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-500">
           <BarChart3 size={13} /> Por inspector
