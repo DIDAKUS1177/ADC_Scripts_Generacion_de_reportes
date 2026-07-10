@@ -145,6 +145,7 @@ def list_mt_inspections():
                 "syncedAt": None,
                 "sistema": row.get("sistema") or None,
                 "inspector": row.get("nombre") or None,
+                "advertencias": _advertencias_generacion(row.get("nombre") or "", "MT"),
             }
         )
     return items
@@ -417,6 +418,7 @@ def list_pmi_inspections():
                 "syncedAt": None,
                 "sistema": row.get("sistema") or None,
                 "inspector": row.get("nombre") or None,
+                "advertencias": _advertencias_generacion(row.get("nombre") or "", "PMI"),
             }
         )
     return items
@@ -658,6 +660,7 @@ def list_570_inspections():
                 "syncedAt": None,
                 "sistema": row.get("sistema") or None,
                 "inspector": row.get("nombre") or None,
+                "advertencias": _advertencias_generacion(row.get("nombre") or "", "570"),
             }
         )
     return items
@@ -841,6 +844,7 @@ def list_510_inspections():
                 "syncedAt": None,
                 "sistema": row.get("tag") or None,
                 "inspector": row.get("nombre") or None,
+                "advertencias": _advertencias_generacion(row.get("nombre") or "", "510"),
             }
         )
     return items
@@ -1021,6 +1025,7 @@ def list_espesores_inspections():
                 "syncedAt": None,
                 "sistema": row.get("sistema") or None,
                 "inspector": row.get("nombre") or None,
+                "advertencias": _advertencias_generacion(row.get("nombre") or "", "ESPESORES"),
             }
         )
     return items
@@ -1218,6 +1223,7 @@ def _listar_scanc(spreadsheet_id: str, tecnica_label: str):
                 "syncedAt": None,
                 "sistema": row.get("sistema") or None,
                 "inspector": row.get("nombre") or None,
+                "advertencias": _advertencias_generacion(row.get("nombre") or "", tecnica_label),
             }
         )
     return items
@@ -1604,6 +1610,7 @@ def list_acfm_inspections():
                 "syncedAt": None,
                 "sistema": row.get("sistema") or None,
                 "inspector": row.get("nombre") or None,
+                "advertencias": _advertencias_generacion(row.get("nombre") or "", "ACFM"),
             }
         )
     return items
@@ -2075,6 +2082,99 @@ def _tiene_certificado_para_tecnica(usuario_nombre: str, tecnica: str) -> bool:
     )
 
 
+# Mapeo técnica -> categoría(s) de equipos_ensayo, usado SOLO para la
+# advertencia de calibración (2026-07-10). Construido a partir de las
+# categorías reales encontradas en la hoja ('MT', 'ACFM', 'Espesores',
+# 'CMAT', 'PAUT_SCANC', entre otras) — se dejaron afuera las técnicas
+# (570/510/PIERNAS_MUERTAS) sin una categoría de equipo claramente
+# identificable en los datos reales, para no inventar una advertencia sobre
+# un equipo que en realidad no le corresponde a esa técnica.
+_TECNICA_A_CATEGORIAS_EQUIPO: dict[str, list[str]] = {
+    "MT": ["mt"],
+    "PMI": ["cmat"],
+    "ESPESORES": ["espesores"],
+    "SCANC_LINEAS": ["paut_scanc"],
+    "SCANC_RP": ["paut_scanc"],
+    "ACFM": ["acfm"],
+}
+
+
+def _advertencias_generacion(nombre_inspector: str, tecnica: str) -> list[str]:
+    """Advertencias visibles ANTES de generar un reporte (pedido 2026-07-10:
+    "en la tabla de reporte y generar debe salir una columna con
+    advertencias" — antes _tiene_certificado_para_tecnica solo se usaba
+    para un toast DESPUÉS de generar). Dos categorías:
+      1. Certificado del inspector: inexistente o vencido (antes solo se
+         chequeaba existencia, nunca vencimiento).
+      2. Calibración de equipos de esa técnica: ninguno vigente registrado
+         (ver _TECNICA_A_CATEGORIAS_EQUIPO — solo para las técnicas con
+         mapeo claro)."""
+    avisos: list[str] = []
+    if not nombre_inspector:
+        return avisos
+
+    try:
+        usuarios = read_sheet_as_dicts(BD_SPREADSHEET_ID, "usuarios")
+        certificados = read_sheet_as_dicts(BD_SPREADSHEET_ID, "certificados_usuarios")
+    except Exception:
+        usuarios, certificados = [], []
+
+    palabras_objetivo = set(_normalizar_nombre(nombre_inspector).split())
+    usuario_login = None
+    if palabras_objetivo:
+        for u in usuarios:
+            palabras_bd = set(_normalizar_nombre(u.get("nombre", "")).split())
+            if not palabras_bd:
+                continue
+            corta, larga = (
+                (palabras_bd, palabras_objetivo)
+                if len(palabras_bd) <= len(palabras_objetivo)
+                else (palabras_objetivo, palabras_bd)
+            )
+            if len(corta) >= 2 and corta.issubset(larga):
+                usuario_login = u.get("usuario")
+                break
+
+    if not usuario_login:
+        avisos.append(f"Inspector sin registrar en la BD de usuarios")
+    else:
+        certs_tecnica = [
+            c for c in certificados
+            if str(c.get("usuario", "")).strip() == usuario_login
+            and str(c.get("tecnica", "")).strip().upper() == tecnica.upper()
+        ]
+        if not certs_tecnica:
+            avisos.append(f"Sin certificado de {tecnica} registrado")
+        elif all(
+            _calcular_estado_certificado(c.get("fecha_vencimiento", "")) == "VENCIDA"
+            for c in certs_tecnica
+        ):
+            avisos.append(f"Certificado de {tecnica} vencido")
+
+    categorias = _TECNICA_A_CATEGORIAS_EQUIPO.get(tecnica.upper())
+    if categorias:
+        try:
+            equipos = read_sheet_as_dicts(BD_SPREADSHEET_ID, "equipos_ensayo")
+        except Exception:
+            equipos = []
+        equipos_tecnica = [
+            e for e in equipos
+            if (e.get("categoria", "") or "").strip().lower() in categorias
+            and _parse_bool_equipo(e.get("activo", ""))
+        ]
+        if equipos_tecnica and not any(
+            _calcular_estado_certificado(e.get("fecha_vencimiento_calibracion", "")) == "VIGENTE"
+            for e in equipos_tecnica
+        ):
+            avisos.append(f"Equipos de {tecnica} sin calibración vigente registrada")
+
+    return avisos
+
+
+def _parse_bool_equipo(valor: str) -> bool:
+    return (valor or "").strip().upper() in ("TRUE", "VERDADERO", "SI", "SÍ", "1")
+
+
 @app.get("/api/preview/ots")
 def list_ots():
     try:
@@ -2493,8 +2593,12 @@ def crear_certificado_personal(payload: dict = Body(...)):
     return {"ok": True, "idCertificado": id_certificado}
 
 
+# "nombre" y "cc" quitados de aquí a propósito (2026-07-10, pedido
+# explícito: "no debería de cambiar lo relacionado a nombre ni cédula") —
+# son la clave de identidad del roster; editarlos solo debe pasar al crear
+# un certificado nuevo (POST), nunca vía PATCH de un certificado existente.
 _CAMPOS_CERTIFICADO_PERSONAL = {
-    "nombre": "nombre", "cc": "cc", "numeroCertificado": "numero_certificado",
+    "numeroCertificado": "numero_certificado",
     "tecnica": "tecnica", "nivel": "nivel", "fechaEmision": "fecha_emision",
     "fechaVencimiento": "fecha_vencimiento",
 }

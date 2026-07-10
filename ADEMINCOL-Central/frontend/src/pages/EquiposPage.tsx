@@ -12,6 +12,9 @@ import {
   Wrench,
   Users2,
   Power,
+  Clock,
+  Sun,
+  Moon,
 } from "lucide-react";
 import {
   fetchRealUsers,
@@ -36,30 +39,111 @@ import { Badge } from "../components/ui/Badge";
 import { useToast } from "../components/ui/Toast";
 import { ROLE_LABEL } from "../components/layout/navConfig";
 import { ComboSelect } from "../components/ui/ComboSelect";
+import { useTheme } from "../context/ThemeContext";
 
 type Tab = "personal" | "equipos" | "roster";
 
 const TABS: { code: Tab; label: string; icon: typeof Users2 }[] = [
   { code: "personal", label: "Usuarios de la webapp", icon: Users2 },
   { code: "equipos", label: "Equipos físicos", icon: Wrench },
-  { code: "roster", label: "Roster de certificados", icon: Award },
+  { code: "roster", label: "Certificados", icon: Award },
 ];
 
 // Valor de filtro compartido por los selects de "Todos/Todas" en las tablas
 // 100% editables de Equipos y Certificados (decisión 2026-07-08).
 const FILTRO_TODOS = "__todos__";
 
+// ---- Estado de una fecha de vencimiento (calibración de equipo o
+// certificado) — compartido entre las tabs de Equipos y Certificados
+// (pedido 2026-07-10: advertencia de "faltan N días" 2 meses antes, y
+// distinguir explícitamente cuando NO hay fecha registrada — antes esos
+// casos se veían "normales" en vez de advertir).
+type EstadoFecha = "vencido" | "por_vencer" | "vigente" | "sin_fecha";
+
+function estadoFechaVencimiento(fecha: string): { estado: EstadoFecha; dias: number | null } {
+  const valor = (fecha || "").trim();
+  if (!valor) return { estado: "sin_fecha", dias: null };
+  const d = new Date(valor);
+  if (isNaN(d.getTime())) return { estado: "sin_fecha", dias: null };
+  const dias = Math.ceil((d.getTime() - Date.now()) / 86400000);
+  if (dias < 0) return { estado: "vencido", dias };
+  if (dias <= 60) return { estado: "por_vencer", dias }; // 2 meses antes
+  return { estado: "vigente", dias };
+}
+
+function AvisoVencimiento({ fecha }: { fecha: string }) {
+  const { estado, dias } = estadoFechaVencimiento(fecha);
+  if (estado === "sin_fecha") {
+    return <p className="mt-1 text-[11px] font-medium text-orange-500">Sin fecha registrada</p>;
+  }
+  if (estado === "vencido") {
+    return (
+      <p className="mt-1 text-[11px] font-medium text-red-600">
+        Vencido hace {Math.abs(dias ?? 0)} día{Math.abs(dias ?? 0) === 1 ? "" : "s"}
+      </p>
+    );
+  }
+  if (estado === "por_vencer") {
+    return (
+      <p className="mt-1 text-[11px] font-medium text-amber-600">
+        Faltan {dias} día{dias === 1 ? "" : "s"} para vencer
+      </p>
+    );
+  }
+  return null;
+}
+
+function RelojActual() {
+  const [ahora, setAhora] = useState(new Date());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setAhora(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const fecha = ahora.toLocaleDateString("es-CO", { day: "2-digit", month: "long", year: "numeric" });
+  const hora = ahora.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  return (
+    <div className="flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-600 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-300">
+      <Clock size={13} className="text-ink-400 dark:text-ink-500" />
+      <span className="capitalize">{fecha}</span>
+      <span className="font-mono text-ink-800 dark:text-ink-100">{hora}</span>
+    </div>
+  );
+}
+
+function ThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
+  return (
+    <button
+      onClick={toggleTheme}
+      title={theme === "light" ? "Cambiar a modo oscuro" : "Cambiar a modo claro"}
+      className="flex items-center gap-1.5 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-600 hover:bg-ink-50 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-300 dark:hover:bg-ink-700"
+    >
+      {theme === "light" ? <Moon size={13} /> : <Sun size={13} />}
+      {theme === "light" ? "Modo oscuro" : "Modo claro"}
+    </button>
+  );
+}
+
 export function EquiposPage() {
   const [tab, setTab] = useState<Tab>("personal");
 
   return (
-    <div>
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold text-ink-900">Equipos y Certificados</h1>
-        <p className="text-sm text-ink-500">
-          Usuarios de la plataforma, equipos físicos de ensayo y el roster completo de
-          certificados del personal de ADEMINCOL
-        </p>
+    <div className="dark:text-ink-100">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-ink-900 dark:text-white">Equipos y Certificados</h1>
+          <p className="text-sm text-ink-500 dark:text-ink-400">
+            Usuarios de la plataforma, equipos físicos de ensayo y los certificados del
+            personal de ADEMINCOL
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <RelojActual />
+          <ThemeToggle />
+        </div>
       </div>
 
       <div className="mb-5 flex flex-wrap gap-2">
@@ -72,7 +156,7 @@ export function EquiposPage() {
               className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
                 tab === t.code
                   ? "bg-brand-600 text-white"
-                  : "bg-white text-ink-600 border border-ink-200 hover:bg-ink-50"
+                  : "bg-white text-ink-600 border border-ink-200 hover:bg-ink-50 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-300 dark:hover:bg-ink-700"
               }`}
             >
               <Icon size={15} />
@@ -432,14 +516,6 @@ function EquiposFisicosTab() {
     });
   }, [equipos, query, filtroCategoria, filtroActivo]);
 
-  function hoyEsVencimientoProximo(fecha: string): boolean {
-    if (!fecha) return false;
-    const d = new Date(fecha);
-    if (isNaN(d.getTime())) return false;
-    const dias = (d.getTime() - Date.now()) / 86400000;
-    return dias <= 60;
-  }
-
   function valorCampo(e: RealEquipo, campo: keyof EquipoEdit): string {
     const edit = edits[e.idEquipo];
     const val = edit && campo in edit ? edit[campo] : e[campo];
@@ -572,7 +648,9 @@ function EquiposFisicosTab() {
             <tbody className="divide-y divide-ink-100">
               {filtered.map((e) => {
                 const dirty = esDirty(e.idEquipo);
-                const proximaAVencer = hoyEsVencimientoProximo(valorCampo(e, "fechaVencimientoCalibracion"));
+                const { estado: estadoVencimiento } = estadoFechaVencimiento(
+                  valorCampo(e, "fechaVencimientoCalibracion")
+                );
                 return (
                   <tr key={e.idEquipo} className={!e.activo ? "opacity-50" : ""}>
                     <td className="px-1.5 py-1.5 min-w-[120px]">
@@ -621,9 +699,14 @@ function EquiposFisicosTab() {
                         value={valorCampo(e, "fechaVencimientoCalibracion")}
                         onChange={(ev) => setCampo(e.idEquipo, "fechaVencimientoCalibracion", ev.target.value)}
                         className={`rounded border px-2 py-1 text-xs outline-none focus:border-brand-600 ${
-                          proximaAVencer ? "border-amber-400 bg-amber-50" : "border-ink-200"
+                          estadoVencimiento === "por_vencer" || estadoVencimiento === "vencido"
+                            ? "border-amber-400 bg-amber-50"
+                            : estadoVencimiento === "sin_fecha"
+                              ? "border-orange-300 bg-orange-50"
+                              : "border-ink-200"
                         }`}
                       />
+                      <AvisoVencimiento fecha={valorCampo(e, "fechaVencimientoCalibracion")} />
                     </td>
                     <td className="px-1.5 py-1.5">
                       <input
@@ -636,7 +719,9 @@ function EquiposFisicosTab() {
                     <td className="px-3 py-2.5">
                       <div className="flex items-center gap-1.5">
                         <Badge tone={e.activo ? "green" : "gray"}>{e.activo ? "Activo" : "Inactivo"}</Badge>
-                        {proximaAVencer && <Badge tone="yellow">Por vencer</Badge>}
+                        {estadoVencimiento === "por_vencer" && <Badge tone="yellow">Por vencer</Badge>}
+                        {estadoVencimiento === "vencido" && <Badge tone="red">Vencido</Badge>}
+                        {estadoVencimiento === "sin_fecha" && <Badge tone="gray">Sin fecha</Badge>}
                       </div>
                     </td>
                     <td className="px-3 py-2.5">
@@ -821,14 +906,21 @@ function NuevoEquipoModal({
 }
 
 // =====================================================================
-// Tab 3: Roster de certificados (RRHH) — decisión D17 (2026-07-07),
-// tabla plana 100% editable por celda + filtros (2026-07-08). La
-// técnica es texto libre (no un select cerrado): el personal de
-// ADEMINCOL maneja 29+ técnicas distintas y solo 4 tienen reporte
-// automatizado, así que restringir el campo perdería información real.
+// Tab 3: Certificados (RRHH) — decisión D17 (2026-07-07), tabla plana
+// editable por celda + filtros (2026-07-08). La técnica es texto libre (no
+// un select cerrado): el personal de ADEMINCOL maneja 29+ técnicas
+// distintas y solo 4 tienen reporte automatizado, así que restringir el
+// campo perdería información real.
+//
+// 2026-07-10: "nombre" y "cc" dejan de ser editables en esta tabla (pedido
+// explícito: "no debería de cambiar lo relacionado a nombre ni cédula, esto
+// no debería de cambiar al menos en la tabla") — son la clave de identidad
+// del roster, editarlas por accidente en una celda inline puede desligar
+// certificados de la persona real. Siguen siendo editables al CREAR un
+// certificado nuevo (NuevoCertificadoModal), solo no en la edición inline.
 // =====================================================================
 type CertificadoEdit = Partial<
-  Pick<PersonalCertificado, "nombre" | "cc" | "numeroCertificado" | "tecnica" | "nivel" | "fechaEmision" | "fechaVencimiento">
+  Pick<PersonalCertificado, "numeroCertificado" | "tecnica" | "nivel" | "fechaEmision" | "fechaVencimiento">
 >;
 
 function CertificadosTab() {
@@ -897,15 +989,6 @@ function CertificadosTab() {
         newEdits[idCertificado] = {};
       }
       newEdits[idCertificado][campo] = valor;
-      
-      // Auto-fill CC si cambia el nombre y el nombre existe en el map
-      if (campo === "nombre") {
-        const trimmed = valor.trim();
-        if (nombreToCcMap[trimmed]) {
-          newEdits[idCertificado].cc = nombreToCcMap[trimmed];
-        }
-      }
-
       return newEdits;
     });
   }
@@ -960,8 +1043,9 @@ function CertificadosTab() {
   return (
     <div>
       <p className="mb-4 text-xs text-ink-500">
-        Roster maestro de RRHH — identificado por cédula, no por usuario de la webapp. Incluye
-        personal que todavía no tiene login en la plataforma. La técnica es texto libre.
+        Listado maestro de RRHH, identificado por cédula (no por usuario de la webapp). Incluye
+        personal que todavía no tiene login en la plataforma. La técnica es texto libre. El
+        nombre y la cédula no se editan desde esta tabla.
       </p>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex flex-1 flex-wrap items-center gap-2">
@@ -1031,21 +1115,11 @@ function CertificadosTab() {
                 const dirty = esDirty(c.idCertificado);
                 return (
                   <tr key={c.idCertificado}>
-                    <td className="px-1.5 py-1.5 min-w-[160px]">
-                      <ComboSelect
-                        value={valorCampo(c, "nombre")}
-                        options={nombresUnicos}
-                        onChange={(val) => setCampo(c.idCertificado, "nombre", val)}
-                        placeholder="Nombre..."
-                        className="w-full"
-                      />
+                    <td className="px-3 py-2 min-w-[160px] text-sm text-ink-800" title="El nombre no se edita desde esta tabla">
+                      {c.nombre || "—"}
                     </td>
-                    <td className="px-1.5 py-1.5">
-                      <input
-                        value={valorCampo(c, "cc")}
-                        onChange={(ev) => setCampo(c.idCertificado, "cc", ev.target.value)}
-                        className="w-24 rounded border border-transparent px-2 py-1 font-mono text-xs text-ink-600 outline-none hover:border-ink-200 focus:border-brand-600"
-                      />
+                    <td className="px-3 py-2 font-mono text-xs text-ink-600" title="La cédula no se edita desde esta tabla">
+                      {c.cc || "—"}
                     </td>
                     <td className="px-1.5 py-1.5">
                       <input
@@ -1085,6 +1159,7 @@ function CertificadosTab() {
                         onChange={(ev) => setCampo(c.idCertificado, "fechaVencimiento", ev.target.value)}
                         className="rounded border border-ink-200 px-2 py-1 text-xs outline-none focus:border-brand-600"
                       />
+                      <AvisoVencimiento fecha={valorCampo(c, "fechaVencimiento")} />
                     </td>
                     <td className="px-3 py-2.5">{c.estado && <Badge tone={estadoTone(c.estado)}>{c.estado}</Badge>}</td>
                     <td className="px-3 py-2.5">

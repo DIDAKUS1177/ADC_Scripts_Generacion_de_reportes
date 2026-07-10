@@ -4,15 +4,18 @@ import {
   downloadJobResult,
   fetchRealPmiInspectionDetail,
   fetchRealPmiInspections,
+  fetchRealUsers,
   getJobStatus,
   pmiGraficoDurezasUrl,
   startReportJob,
   PreviewApiError,
   type PmiPreviewDetail,
   type PmiPreviewItem,
+  type RealUser,
 } from "../../api/previewClient";
 import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
+import { AdvertenciasCell } from "../ui/AdvertenciasCell";
 import { PhotoGallery } from "../ui/PhotoGallery";
 import { useToast } from "../ui/Toast";
 import { useAuth } from "../../context/AuthContext";
@@ -39,6 +42,22 @@ export function RealPmiInspectionsPanel() {
   const [graficoError, setGraficoError] = useState(false);
   const [showLoteModal, setShowLoteModal] = useState(false);
   const batchGen = useBatchGeneration("pmi");
+
+  // Selector de revisor registrado (2026-07-10, mejora del flujo existente
+  // de "Revisado por" — antes solo se podía usar la propia firma o escribir
+  // nombre/cargo a mano y subir una imagen; con esto se puede elegir a
+  // cualquier usuario YA registrado y el backend resuelve su nombre/cargo/
+  // firma automáticamente, sin volver a subir nada).
+  const [usuarios, setUsuarios] = useState<RealUser[]>([]);
+  const [revisorUsuario, setRevisorUsuario] = useState("");
+  useEffect(() => {
+    fetchRealUsers()
+      .then(setUsuarios)
+      .catch(() => setUsuarios([]));
+  }, []);
+  useEffect(() => {
+    if (user?.usuario && !revisorUsuario) setRevisorUsuario(user.usuario);
+  }, [user, revisorUsuario]);
 
   const filtered = useMemo(() => {
     if (!items) return null;
@@ -84,7 +103,7 @@ export function RealPmiInspectionsPanel() {
       const jobId = await startReportJob("pmi", selected, {
         ...edits,
         elemento_grafico: elementoGrafico,
-        supervisor_usuario: user?.usuario ?? "",
+        supervisor_usuario: revisorUsuario || user?.usuario || "",
       });
       pollRef.current = window.setInterval(async () => {
         try {
@@ -175,6 +194,7 @@ export function RealPmiInspectionsPanel() {
               <th className="px-4 py-2.5">Cliente</th>
               <th className="px-4 py-2.5">OT</th>
               <th className="px-4 py-2.5">Estado</th>
+              <th className="px-4 py-2.5">Advertencias</th>
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
@@ -205,6 +225,9 @@ export function RealPmiInspectionsPanel() {
                     {it.estadoReporte === "GENERADO" ? "Generado" : "Pendiente"}
                   </Badge>
                 </td>
+                <td className="px-4 py-2.5">
+                  <AdvertenciasCell advertencias={it.advertencias} />
+                </td>
                 <td className="px-4 py-2.5 text-ink-400">
                   <Eye size={14} />
                 </td>
@@ -233,13 +256,30 @@ export function RealPmiInspectionsPanel() {
                 </p>
               </div>
               {!job && (
-                <button
-                  onClick={handleGenerar}
-                  className="flex shrink-0 items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
-                >
-                  <Download size={14} />
-                  Generar reporte (.xlsx)
-                </button>
+                <div className="flex shrink-0 items-end gap-2">
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-medium text-ink-500">Revisor</span>
+                    <select
+                      value={revisorUsuario}
+                      onChange={(e) => setRevisorUsuario(e.target.value)}
+                      className="rounded-lg border border-ink-200 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
+                    >
+                      {usuarios.map((u) => (
+                        <option key={u.usuario} value={u.usuario}>
+                          {u.nombre}
+                          {u.usuario === user?.usuario ? " (tú)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    onClick={handleGenerar}
+                    className="flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+                  >
+                    <Download size={14} />
+                    Generar reporte (.xlsx)
+                  </button>
+                </div>
               )}
             </div>
 
@@ -377,6 +417,7 @@ export function RealPmiInspectionsPanel() {
         <ConfigurarLoteModal
           cantidad={batchGen.selected.size}
           nombreUsuario={user?.usuario ?? ""}
+          usuarios={usuarios}
           onClose={() => setShowLoteModal(false)}
           onConfirmar={(overrides) => {
             setShowLoteModal(false);
@@ -393,18 +434,29 @@ export function RealPmiInspectionsPanel() {
 // blanco, cada reporte usa la firma del usuario autenticado (comportamiento
 // individual de siempre); si se llena, ese dato manual gana prioridad en el
 // backend sobre la búsqueda por usuario (ver _generar_bytes_pmi en main.py).
+//
+// 2026-07-10: se agrega un selector de "revisor registrado" — antes la
+// única forma de usar la firma de alguien más era escribir su nombre/cargo
+// a mano y volver a subir su imagen de firma cada vez. Ahora, si esa
+// persona ya tiene usuario y firma cargados en la plataforma, alcanza con
+// elegirla de la lista (mismo mecanismo que ya resolvía main.py para "tu
+// propia firma", generalizado a cualquier usuario). El campo manual queda
+// como respaldo para revisores que NO están registrados en la plataforma.
 function ConfigurarLoteModal({
   cantidad,
   nombreUsuario,
+  usuarios,
   onClose,
   onConfirmar,
 }: {
   cantidad: number;
   nombreUsuario: string;
+  usuarios: RealUser[];
   onClose: () => void;
   onConfirmar: (overrides: Record<string, string>) => void;
 }) {
   const toast = useToast();
+  const [revisorRegistrado, setRevisorRegistrado] = useState(nombreUsuario);
   const [nombre, setNombre] = useState("");
   const [cargo, setCargo] = useState("");
   const [firmaBase64, setFirmaBase64] = useState<string | null>(null);
@@ -429,7 +481,7 @@ function ConfigurarLoteModal({
   }
 
   function handleConfirmar() {
-    const overrides: Record<string, string> = { supervisor_usuario: nombreUsuario };
+    const overrides: Record<string, string> = { supervisor_usuario: revisorRegistrado || nombreUsuario };
     if (nombre.trim()) overrides.supervisor_nombre_manual = nombre.trim();
     if (cargo.trim()) overrides.supervisor_cargo_manual = cargo.trim();
     if (firmaBase64) overrides.supervisor_firma_manual = firmaBase64;
@@ -452,12 +504,28 @@ function ConfigurarLoteModal({
         </div>
 
         <div className="space-y-3 p-5">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-ink-700">Revisor registrado</label>
+            <select
+              value={revisorRegistrado}
+              onChange={(e) => setRevisorRegistrado(e.target.value)}
+              className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
+            >
+              {usuarios.map((u) => (
+                <option key={u.usuario} value={u.usuario}>
+                  {u.nombre}
+                  {u.usuario === nombreUsuario ? " (tú)" : ""}
+                  {!u.tieneFirma ? " — sin firma cargada" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
           <p className="rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-500">
-            Déjalo en blanco para usar tu propia firma de perfil en cada reporte, o llénalo
-            para que TODOS los reportes del lote queden firmados con estos mismos datos.
+            Si el revisor NO está registrado en la plataforma, escribe su nombre/cargo/firma
+            manualmente abajo — eso tiene prioridad sobre la selección de arriba.
           </p>
           <div>
-            <label className="mb-1 block text-xs font-medium text-ink-700">Nombre</label>
+            <label className="mb-1 block text-xs font-medium text-ink-700">Nombre (manual, opcional)</label>
             <input
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}

@@ -438,6 +438,119 @@ viejos vinculados a una OT ahora muestran el supervisor de esa OT vía el
 fallback (`crojas` en los casos reales); confirmado en el navegador tanto
 en la vista expandida de una OT como en "Servicios sin OT asociada".
 
+## Tanda de 8 pedidos: EquiposPage, Servicios, advertencias y revisor PMI (2026-07-10)
+
+El usuario mandó una lista numerada de 8 cambios en un solo mensaje. Antes de
+tocar código se investigó el estado real de cada uno (agente de
+investigación dedicado) y se preguntó al usuario el alcance de los dos
+puntos más grandes/ambiguos (6 y 8) antes de implementar, para no rehacer
+trabajo. Resumen de lo que se hizo, punto por punto:
+
+**1. Reloj + modo oscuro/claro (EquiposPage).** Tailwind v4 no trae
+`darkMode` en config JS — se usa `@custom-variant dark (&:where(.dark, .dark
+*));` en `index.css`. `ThemeContext.tsx` nuevo (mismo patrón que
+`AuthContext.tsx`): persiste en localStorage, aplica/quita la clase `.dark`
+en `<html>`. El toggle y el reloj (`RelojActual`, actualiza cada segundo)
+viven en `EquiposPage.tsx`. **Alcance deliberadamente limitado**: por ahora
+SOLO `EquiposPage.tsx` tiene estilos `dark:` aplicados — el resto de
+páginas no cambia visualmente todavía al togglear (retrofit completo del
+resto de la app queda pendiente, es un trabajo aparte).
+
+**2. Fechas de calibración — investigación de datos reales.** No hay
+ninguna fórmula automática (no es `fecha_calibracion + N meses`): el campo
+`fecha_vencimiento_calibracion` es 100% entrada manual en
+`equipos_ensayo`. Se investigaron los 64 equipos reales y se encontraron 2
+problemas de datos concretos (no de código):
+  - **4 equipos con `fecha_calibración == fecha_vencimiento`**
+    (EQ-0027, EQ-0028, EQ-0034, EQ-0059 — todos REDDY-32/ACFM). Probable
+    error de tipeo (alguien copió la misma fecha en los dos campos). NO se
+    corrigió automáticamente — no hay forma de adivinar la fecha correcta,
+    hay que corregirlo a mano en el Sheet.
+  - **35 de 64 equipos sin `fecha_vencimiento_calibracion`** — la UI
+    anterior los trataba silenciosamente como "todo bien" (el chequeo
+    `dias <= 60` da `false` con fecha vacía). Corregido en el punto 5.
+
+**3. "Roster de certificados" → "Certificados".** Cambiado el label del
+tab (`EquiposPage.tsx`) y el texto descriptivo bajo el tab ("Roster maestro
+de RRHH" → "Listado maestro de RRHH"). El identificador interno
+`Tab = "roster"` no se tocó (no es visible al usuario).
+
+**4. Nombre/cédula ya no editables en la tabla de Certificados.**
+Frontend: las celdas de `nombre`/`cc` en `CertificadosTab` pasan de
+`ComboSelect`/`<input>` a texto plano; se sacaron de `CertificadoEdit`
+(el tipo de los campos editables). Backend: se sacaron de
+`_CAMPOS_CERTIFICADO_PERSONAL` (el PATCH ya no las acepta, defensa en
+profundidad). Siguen siendo editables al CREAR un certificado nuevo — solo
+se bloqueó la edición inline de un registro existente.
+
+**5. Advertencia "faltan N días para vencer" (2 meses antes).** Helper
+compartido `estadoFechaVencimiento()` en `EquiposPage.tsx` (usado por
+Equipos Y Certificados): calcula `vencido` / `por_vencer` (≤60 días) /
+`vigente` / `sin_fecha`. Componente `AvisoVencimiento` muestra el texto
+bajo el campo de fecha ("Faltan 12 días para vencer", "Vencido hace 182
+días", "Sin fecha registrada"). Esto también resuelve el hallazgo del
+punto 2: los 35 equipos sin fecha ahora se ven con una advertencia
+explícita en vez de "todo bien" silencioso.
+
+**6. Página "Órdenes de Trabajo" → "Servicios" (OT deja de ser el
+concepto central).** Confirmado con el usuario: "ocultar OT de la UI,
+mantener el dato" (no borrar `work_orders` ni su sync). Reescrita
+`WorkOrdersPage.tsx` completa: se quitó la grilla de tarjetas de OT, el
+botón "Nueva OT" y `NewOTModal` (código muerto, borrado). La página ahora
+es un listado plano de TODOS los servicios (`fetchServicios()` sin
+filtro), con la OT (si tiene) como una columna más ("OT asociada"), no
+como estructura. El modal "Nuevo Servicio" sigue con OT opcional (ya se
+había hecho eso 2026-07-10 más temprano). Nav renombrado: "Órdenes de
+Trabajo"/"Mis OTs" → "Servicios"/"Mis Servicios" (`navConfig.ts`). La ruta
+`/ots` NO se renombró (detalle interno, no visible al usuario).
+
+**7. Columna de advertencias en las tablas de reporte.** Antes,
+`_tiene_certificado_para_tecnica` (main.py) solo generaba un toast DESPUÉS
+de generar el reporte, y solo chequeaba EXISTENCIA de certificado, nunca
+vencimiento. Nueva función `_advertencias_generacion(nombre, tecnica)`:
+  - Certificado: "Sin certificado de X registrado" o "Certificado de X
+    vencido" (usa `_calcular_estado_certificado`, ya existía para el
+    roster) — antes un certificado vencido no generaba ninguna advertencia.
+  - Equipos: "Equipos de X sin calibración vigente registrada", vía
+    `_TECNICA_A_CATEGORIAS_EQUIPO` — mapeo conservador técnica→categoría de
+    equipo (MT, PMI→CMAT, ESPESORES, SCANC_LINEAS/RP→PAUT_SCANC, ACFM). Se
+    dejaron AFUERA 570/510/PIERNAS_MUERTAS a propósito: no hay una
+    categoría de equipo identificable con confianza en los datos reales
+    para esas técnicas, y prefiero no mostrar una advertencia inventada.
+  - Conectado a las 7 funciones `list_*_inspections` relevantes (no
+    Piernas Muertas, que no maneja certificación por diseño). Campo
+    `advertencias: string[]` nuevo en los 7 tipos `*PreviewItem` del
+    frontend. Componente compartido `AdvertenciasCell.tsx` (ícono ⚠ +
+    texto ámbar) agregado a las 7 tablas de listado como columna nueva.
+  - Verificado con datos reales: 49 de 50 informes MT muestran "Equipos de
+    MT sin calibración vigente registrada" — confirmado que es correcto
+    (los 3 equipos categoría MT reales no tienen ninguno con calibración
+    vigente hoy), no un bug de la lógica.
+
+**8. Firma de "revisor" en PMI — confirmado con el usuario: solo mejorar
+PMI, no extender a los 9 formatos todavía.** El flujo ya existía
+(`ConfigurarLoteModal`, solo para generación por LOTE) pero pedía
+nombre/cargo a mano y requería volver a subir la imagen de firma cada vez,
+incluso para revisores que ya son usuarios registrados con firma en la
+plataforma. Mejora: selector "Revisor registrado" (`<select>` poblado con
+`fetchRealUsers()`) tanto en `ConfigurarLoteModal` COMO en la generación
+INDIVIDUAL (que antes no tenía ninguna forma de elegir revisor, quedaba
+fijo al usuario autenticado). Al elegir alguien de la lista, el backend
+resuelve su nombre/cargo/firma automáticamente (mismo mecanismo que ya
+existía para "tu propia firma" en `_generar_bytes_pmi`, generalizado — no
+hubo que tocar el backend, `overrides.supervisor_usuario` ya aceptaba
+cualquier usuario, no solo el que hace la petición). El campo manual queda
+como respaldo para revisores que no están en la plataforma, con prioridad
+sobre la selección.
+
+Verificado extremo a extremo en el navegador para los 8 puntos: reloj y
+modo oscuro visibles y funcionales en Equipos; nombre/cédula de solo
+lectura con "Vencido hace 182 días" real en la tabla; página "Servicios"
+sin grilla de OT, con "Sin OT"/OT real por fila; columna "Advertencias" con
+texto real en MT/PMI; selector de revisor con usuarios reales (incluye "—
+sin firma cargada" cuando aplica) funcionando en ambos modales de PMI. Sin
+errores de consola en ningún caso.
+
 ## Pendiente (no resuelto, anotado para no perderlo)
 
 - Conectar AppSheet directo a `pmi_general` en Postgres en vez de a la hoja de
@@ -445,3 +558,13 @@ en la vista expandida de una OT como en "Servicios sin OT asociada".
   (requiere configurar esto DENTRO de AppSheet, no es código).
 - Evaluar si vale la pena migrar 570/510/SCAN C/Espesores/Piernas Muertas/ACFM
   con el mismo patrón de PMI.
+- Corregir a mano en el Sheet los 4 equipos con fecha_calibracion ==
+  fecha_vencimiento_calibracion (EQ-0027, EQ-0028, EQ-0034, EQ-0059) — no se
+  puede adivinar la fecha correcta desde el código.
+- Retrofit de modo oscuro al resto de páginas (hoy solo EquiposPage
+  responde al toggle).
+- Extender la firma de "revisor" (con selector de usuario registrado, ver
+  punto 8) a los otros 8 motores de reporte — hoy solo PMI la tiene
+  completa; 570 tiene la plantilla y el código de escritura de celda ya
+  listos mas el backend nunca los alimenta (`_generar_bytes_570` no arma
+  `supervisor_*`), sería el candidato más rápido de extender.

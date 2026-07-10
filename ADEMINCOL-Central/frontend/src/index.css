@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* Modo oscuro/claro basado en clase (.dark en <html>), no en
+   prefers-color-scheme del sistema — así el toggle manual manda. Ver
+   ThemeContext.tsx. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Inter", system-ui, sans-serif;
 

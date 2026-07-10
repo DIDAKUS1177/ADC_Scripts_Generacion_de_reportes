@@ -21,6 +21,10 @@ export interface MtPreviewItem {
   estadoReporte: "GENERADO" | "PENDIENTE";
   sistema: string | null;
   inspector: string | null;
+  // Advertencias visibles ANTES de generar (2026-07-10): certificado
+  // vencido/inexistente del inspector, o equipos de la técnica sin
+  // calibración vigente. Antes solo aparecían como toast DESPUÉS de generar.
+  advertencias: string[];
 }
 
 export interface MtPreviewResultado {
@@ -80,6 +84,7 @@ export interface PmiPreviewItem {
   estadoReporte: "GENERADO" | "PENDIENTE";
   sistema: string | null;
   inspector: string | null;
+  advertencias: string[];
 }
 
 export interface PmiPreviewQuimica {
@@ -144,6 +149,7 @@ export interface Sh570PreviewItem {
   estadoReporte: "GENERADO" | "PENDIENTE";
   sistema: string | null;
   inspector: string | null;
+  advertencias: string[];
 }
 
 export interface Sh570SeccionResumen {
@@ -192,6 +198,7 @@ export interface Sh510PreviewItem {
   estadoReporte: "GENERADO" | "PENDIENTE";
   sistema: string | null;
   inspector: string | null;
+  advertencias: string[];
 }
 
 export interface Sh510PreviewDetail extends Sh510PreviewItem {
@@ -281,6 +288,7 @@ export interface AcfmPreviewItem {
   estadoReporte: "GENERADO" | "PENDIENTE";
   sistema: string | null;
   inspector: string | null;
+  advertencias: string[];
 }
 
 export interface AcfmPreviewDetail extends AcfmPreviewItem {
@@ -322,6 +330,7 @@ export interface EspesoresPreviewItem {
   estadoReporte: "GENERADO" | "PENDIENTE";
   sistema: string | null;
   inspector: string | null;
+  advertencias: string[];
 }
 
 export interface EspesoresLectura {
@@ -378,6 +387,7 @@ export interface ScancPreviewItem {
   estadoReporte: "GENERADO" | "PENDIENTE";
   sistema: string | null;
   inspector: string | null;
+  advertencias: string[];
 }
 
 export interface ScancReporteDato {

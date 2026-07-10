@@ -13,6 +13,7 @@ import {
 } from "../../api/previewClient";
 import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
+import { AdvertenciasCell } from "../ui/AdvertenciasCell";
 import { PhotoGallery } from "../ui/PhotoGallery";
 import { useToast } from "../ui/Toast";
 import { useBatchGeneration } from "./useBatchGeneration";
@@ -163,6 +164,7 @@ export function RealScancInspectionsPanel({ variante }: { variante: ScancVariant
                 <th className="px-4 py-2.5">Fecha</th>
                 <th className="px-4 py-2.5">Sistema</th>
                 <th className="px-4 py-2.5">Estado</th>
+                <th className="px-4 py-2.5">Advertencias</th>
                 <th className="px-4 py-2.5"></th>
               </tr>
             </thead>
@@ -195,6 +197,9 @@ export function RealScancInspectionsPanel({ variante }: { variante: ScancVariant
                     <Badge tone={it.estadoReporte === "GENERADO" ? "green" : "gray"}>
                       {it.estadoReporte === "GENERADO" ? "Generado" : "Pendiente"}
                     </Badge>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <AdvertenciasCell advertencias={it.advertencias} />
                   </td>
                   <td className="px-4 py-2.5 text-ink-400">
                     <Eye size={14} />
