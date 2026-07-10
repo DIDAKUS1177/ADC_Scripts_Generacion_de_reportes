@@ -340,6 +340,62 @@ las 7 tablas anteriores, `totalFilas: 6330`, sin errores; probado también
 haciendo clic en "Ejecutar ahora" desde el navegador — el historial de
 `/sync` muestra el desglose por tabla al expandir la corrida.
 
+## Se quita el widget flotante de "reportes por inspector" (2026-07-10)
+
+Pedido explícito del usuario: "quiero que quites esa ventana, ese grafico
+como tal." Se eliminó por completo — `FloatingInspectorChartWidget.tsx`
+borrado, y su montaje en `AppShell.tsx` (fuera de `<main>`) removido. El
+gráfico grande equivalente ("Reportes generados por inspector") sigue
+existiendo en el Dashboard, solo se quitó la versión flotante/colapsable
+que aparecía en todas las páginas.
+
+## "Nuevo Servicio" — OT deja de ser obligatoria (2026-07-10)
+
+Pedido explícito del usuario: "lo de nuevo servicio deberia ser un listado
+como el que sale en nueva ot solo que con un id servicio que se crea
+automaticamente y no es obligatoria la ot."
+
+Antes, crear un servicio desde el botón global "Nuevo Servicio" exigía una
+OT — el frontend lo resolvía con un hack: creaba una OT con número
+placeholder (`S/N-<timestamp>`) solo para poder colgar el servicio de ahí
+(`NewServicioDirectoModal`, ver commit anterior). Eliminado por completo:
+
+- **Backend** (`POST /api/preview/servicios`, `main.py`): `idOt` pasa de
+  obligatorio a opcional. Si viene vacío, el servicio se crea sin `id_ot`
+  en la hoja `servicios` (antes ese caso ni siquiera se podía dar, la
+  validación cortaba con 422 "Falta idOt"). Si viene, sigue validando que
+  la OT exista antes de crear el servicio.
+- **Postgres** (`servicios.id_ot`): era `VARCHAR(50) NOT NULL REFERENCES
+  work_orders(id_ot)` — se corrió `ALTER TABLE servicios ALTER COLUMN
+  id_ot DROP NOT NULL` en Supabase y se actualizó `schema.sql` para que
+  coincida. `sync_servicios()` ahora manda `NULL` en vez de `""` cuando el
+  Sheet trae la celda vacía (una FK con valor `""` literal habría fallado
+  igual, aunque la columna ya admitiera NULL).
+- **Frontend** (`WorkOrdersPage.tsx`): `NewServicioDirectoModal` (modal
+  chico, pedía cliente/ubicación para la OT placeholder) reemplazado por
+  `NewServicioModal`, con la MISMA estructura visual que `NewOTModal`
+  (grid de 2 columnas, mismo header/footer del modal) — pedido explícito
+  de que "sea un listado como el que sale en nueva ot". Campos: Técnica
+  (obligatoria) y OT asociada (`<select>` opcional con las OTs reales
+  cargadas, default "Sin OT asociada"). El id_servicio se sigue generando
+  automático en el backend (`SRV-XXXXXXXX`), no se pide en el formulario.
+  `crearServicio()` en `previewClient.ts` cambió de firma
+  `(idOt, tecnica)` a `(tecnica, idOt?)` para reflejar que la OT ahora es
+  el parámetro opcional.
+- Se agregó una sección nueva "Servicios sin OT asociada" en
+  `WorkOrdersPage.tsx` (debajo de la grilla de OTs) — sin esto, un
+  servicio creado sin OT quedaría invisible en la página, porque el
+  listado de servicios por OT (`ServiciosDeOt`) solo muestra los que están
+  vinculados a una.
+
+Verificado extremo a extremo: `POST /api/preview/servicios` con solo
+`{"tecnica": "MT"}` (sin idOt) crea el servicio y aparece en
+`GET /api/preview/servicios` con `idOt: ""`; probado también con idOt
+presente (flujo que ya funcionaba, sigue funcionando); confirmado en el
+navegador que el modal nuevo tiene la misma apariencia que "Nueva OT" y
+que la sección "Servicios sin OT asociada" muestra el servicio recién
+creado.
+
 ## Pendiente (no resuelto, anotado para no perderlo)
 
 - Conectar AppSheet directo a `pmi_general` en Postgres en vez de a la hoja de

@@ -170,10 +170,14 @@ CREATE TABLE audit_log (
 
 -- Modelo OT -> Servicio -> Técnica (D16). Cada técnica que el supervisor
 -- elige al "generar servicio" desde una OT crea UNA fila aquí.
+-- id_ot es NULLABLE desde 2026-07-10 (pedido explícito: "no es obligatoria
+-- la ot") — un servicio se puede crear suelto y vincularse a una OT más
+-- adelante; antes el frontend rodeaba el requisito creando una OT
+-- placeholder ("S/N-...") solo para poder crear el servicio.
 CREATE TABLE servicios (
     id                  SERIAL PRIMARY KEY,
     id_servicio         VARCHAR(20) UNIQUE NOT NULL,   -- 'SRV-XXXXXXXX', alfanumérico libre (D16)
-    id_ot               VARCHAR(50) NOT NULL REFERENCES work_orders(id_ot),
+    id_ot               VARCHAR(50) REFERENCES work_orders(id_ot),
     tecnica             report_type_code NOT NULL,
     estado              ot_status NOT NULL DEFAULT 'PENDIENTE',
     inspector_usuario   VARCHAR(50) REFERENCES users(usuario),  -- NULL hasta autoasignación en AppSheet

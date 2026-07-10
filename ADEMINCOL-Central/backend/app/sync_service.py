@@ -206,7 +206,7 @@ def sync_servicios() -> int:
                     estado = "PENDIENTE"
                 cur.execute(sql, (
                     r["id_servicio"].strip(),
-                    r.get("id_ot", "").strip(),
+                    r.get("id_ot", "").strip() or None,  # servicio sin OT asociada (2026-07-10)
                     tecnica,
                     estado,
                     r.get("inspector_usuario", "").strip() or None,

@@ -33,6 +33,7 @@ export function WorkOrdersPage() {
   const [showModal, setShowModal] = useState(false);
   const [showServicioModal, setShowServicioModal] = useState(false);
   const [expandedOt, setExpandedOt] = useState<string | null>(null);
+  const [serviciosSinOt, setServiciosSinOt] = useState<RealServicio[] | null>(null);
 
   function load() {
     setError(null);
@@ -44,7 +45,18 @@ export function WorkOrdersPage() {
       );
   }
 
+  // Servicios sin OT asociada (pedido 2026-07-10: la OT ya no es obligatoria
+  // al crear un servicio) — sin esta lista, un servicio creado sin OT
+  // quedaría invisible en la página (ServiciosDeOt solo muestra los que
+  // están vinculados a una OT).
+  function loadServiciosSinOt() {
+    fetchServicios()
+      .then((todos) => setServiciosSinOt(todos.filter((s) => !s.idOt)))
+      .catch(() => setServiciosSinOt(null));
+  }
+
   useEffect(load, []);
+  useEffect(loadServiciosSinOt, []);
 
   const canCreate = user?.rol === "ADMINISTRADOR" || user?.rol === "SUPERVISOR";
 
@@ -126,6 +138,28 @@ export function WorkOrdersPage() {
         </div>
       )}
 
+      {serviciosSinOt !== null && serviciosSinOt.length > 0 && (
+        <div className="mt-6 rounded-xl border border-dashed border-ink-300 bg-ink-50/60 p-5">
+          <p className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-ink-700">
+            <Wrench size={14} /> Servicios sin OT asociada ({serviciosSinOt.length})
+          </p>
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+            {serviciosSinOt.map((s) => (
+              <div
+                key={s.idServicio}
+                className="flex items-center justify-between rounded-md bg-white px-2.5 py-1.5 text-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <Badge tone="blue">{s.tecnica}</Badge>
+                  <span className="font-mono text-ink-500">{s.idServicio}</span>
+                </div>
+                <OTStatusBadge status={s.estado} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {showModal && (
         <NewOTModal
           onClose={() => setShowModal(false)}
@@ -137,11 +171,13 @@ export function WorkOrdersPage() {
       )}
 
       {showServicioModal && (
-        <NewServicioDirectoModal
+        <NewServicioModal
+          ots={ots ?? []}
           onClose={() => setShowServicioModal(false)}
           onCreated={() => {
             setShowServicioModal(false);
             load();
+            loadServiciosSinOt();
           }}
         />
       )}
@@ -165,7 +201,7 @@ function ServiciosDeOt({ idOt, canCreate }: { idOt: string; canCreate: boolean }
   async function handleGenerarServicio(tecnica: Tecnica) {
     setCreando(tecnica);
     try {
-      await crearServicio(idOt, tecnica);
+      await crearServicio(tecnica, idOt);
       toast.success(`Servicio ${tecnica} generado.`);
       load();
     } catch (e) {
@@ -364,103 +400,98 @@ function NewOTModal({ onClose, onCreated }: { onClose: () => void; onCreated: ()
   );
 }
 
-function NewServicioDirectoModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const { user } = useAuth();
+// Mismo formato que NewOTModal (grid 2 columnas, mismo chrome de modal) —
+// pedido explícito 2026-07-10: "que lo de nuevo servicio deberia ser un
+// listado como el que sale en nueva ot". El id_servicio se genera
+// automáticamente en el backend (no se pide acá) y la OT es OPCIONAL: ya
+// no se crea una OT placeholder ("S/N-...") para poder crear el servicio,
+// como hacía la versión anterior de este modal.
+function NewServicioModal({
+  ots,
+  onClose,
+  onCreated,
+}: {
+  ots: RealOT[];
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const toast = useToast();
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    tecnica: "MT" as Tecnica,
-    cliente: "",
-    ubicacion: "",
+  const [form, setForm] = useState<{ tecnica: Tecnica; idOt: string }>({
+    tecnica: "MT",
+    idOt: "",
   });
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!user) return;
     setSaving(true);
     try {
-      // 1. Crear OT con número placeholder porque "la OT se da hasta al final del servicio"
-      const numeroPlaceholder = `S/N-${new Date().getTime().toString().slice(-6)}`;
-      const otPayload: Omit<NewOTPayload, "supervisorUsuario"> = {
-        numero: numeroPlaceholder,
-        cliente: form.cliente,
-        ubicacion: form.ubicacion,
-        estado: "PENDIENTE",
-      };
-      
-      const { idOt } = await createRealOT({ ...otPayload, supervisorUsuario: user.usuario });
-      
-      // 2. Crear el servicio amarrado a esa OT
-      await crearServicio(idOt, form.tecnica as Tecnica);
-      
-      toast.success(`Servicio ${form.tecnica} creado (OT provisional: ${numeroPlaceholder}).`);
+      const { idServicio } = await crearServicio(form.tecnica, form.idOt || undefined);
+      toast.success(
+        form.idOt
+          ? `Servicio ${idServicio} creado y vinculado a la OT.`
+          : `Servicio ${idServicio} creado (sin OT asociada).`
+      );
       onCreated();
     } catch (err) {
-      toast.error(err instanceof PreviewApiError ? err.message : "No se pudo crear el servicio directo.");
+      toast.error(err instanceof PreviewApiError ? err.message : "No se pudo crear el servicio.");
     } finally {
       setSaving(false);
     }
   }
 
-  const inputCls = "w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600";
+  const inputCls =
+    "w-full rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-md rounded-xl bg-white shadow-2xl"
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-2xl"
       >
-        <div className="flex items-center justify-between border-b border-ink-100 p-5">
-          <h2 className="text-lg font-bold text-ink-900">Nuevo Servicio (Directo)</h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-ink-900">Nuevo Servicio</h2>
           <button type="button" onClick={onClose} className="rounded-lg p-1.5 hover:bg-ink-100">
             <X size={18} />
           </button>
         </div>
-        
-        <div className="p-5">
-          <p className="mb-4 text-xs text-ink-500 bg-ink-50 p-3 rounded-lg">
-            Esta opción creará un servicio inmediatamente y le asignará una Orden de Trabajo con un <strong>número provisional</strong> ("S/N-..."). Podrás editar la OT más adelante cuando el cliente confirme el número oficial.
-          </p>
-          
-          <div className="space-y-4">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-ink-700">Técnica a ejecutar *</label>
-              <select
-                required
-                value={form.tecnica}
-                onChange={(e) => setForm({ ...form, tecnica: e.target.value as Tecnica })}
-                className={inputCls}
-              >
-                {TECNICAS_DISPONIBLES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            
-            <div>
-              <label className="mb-1 block text-xs font-medium text-ink-700">Cliente (opcional)</label>
-              <input
-                value={form.cliente}
-                onChange={(e) => setForm({ ...form, cliente: e.target.value })}
-                placeholder="Ej: Ecopetrol"
-                className={inputCls}
-              />
-            </div>
-            
-            <div>
-              <label className="mb-1 block text-xs font-medium text-ink-700">Ubicación (opcional)</label>
-              <input
-                value={form.ubicacion}
-                onChange={(e) => setForm({ ...form, ubicacion: e.target.value })}
-                placeholder="Ej: Planta Barrancabermeja"
-                className={inputCls}
-              />
-            </div>
-          </div>
+
+        <p className="mb-4 rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-500">
+          El ID del servicio se genera automáticamente. La OT es opcional — se puede
+          dejar sin asociar y vincularse más adelante.
+        </p>
+
+        <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
+          <Field label="Técnica a ejecutar *">
+            <select
+              required
+              value={form.tecnica}
+              onChange={(e) => setForm({ ...form, tecnica: e.target.value as Tecnica })}
+              className={inputCls}
+            >
+              {TECNICAS_DISPONIBLES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="OT asociada (opcional)">
+            <select
+              value={form.idOt}
+              onChange={(e) => setForm({ ...form, idOt: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">Sin OT asociada</option>
+              {ots.map((ot) => (
+                <option key={ot.idOt} value={ot.idOt}>
+                  {ot.numero} — {ot.cliente ?? "sin cliente"}
+                </option>
+              ))}
+            </select>
+          </Field>
         </div>
-        
+
         <div className="flex justify-end gap-3 border-t border-ink-100 bg-ink-50 p-4">
           <button
             type="button"

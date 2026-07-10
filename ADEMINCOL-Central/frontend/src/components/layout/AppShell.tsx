@@ -3,7 +3,6 @@ import { NavLink, Outlet } from "react-router-dom";
 import { LogOut, Menu, X } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { NAV_BY_ROLE, ROLE_LABEL, type NavItem } from "./navConfig";
-import { FloatingInspectorChartWidget } from "./FloatingInspectorChartWidget";
 
 // Menú SUPERIOR (2026-07-09) — antes era una barra lateral fija a la
 // izquierda; se cambió a top-nav por pedido explícito ("me parece muy
@@ -100,8 +99,6 @@ export function AppShell() {
       <main className="mx-auto w-full max-w-[1600px] flex-1 overflow-x-hidden p-4 lg:p-8">
         <Outlet />
       </main>
-
-      <FloatingInspectorChartWidget />
     </div>
   );
 }

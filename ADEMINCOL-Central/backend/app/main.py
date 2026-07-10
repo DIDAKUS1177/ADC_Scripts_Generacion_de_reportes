@@ -2194,17 +2194,20 @@ def list_servicios(id_ot: str | None = None):
 
 @app.post("/api/preview/servicios")
 def crear_servicio(payload: dict = Body(...)):
+    # id_ot es OPCIONAL (pedido 2026-07-10: "no es obligatoria la ot") — un
+    # servicio se puede crear suelto y vincularse a una OT más adelante. Antes
+    # el frontend rodeaba este requisito creando una OT placeholder
+    # ("S/N-...") solo para poder crear el servicio; se elimina ese hack acá.
     id_ot = str(payload.get("idOt", "")).strip()
     tecnica = str(payload.get("tecnica", "")).strip().upper()
-    if not id_ot:
-        raise HTTPException(status_code=422, detail="Falta idOt")
     if tecnica not in ("MT", "PMI"):
         raise HTTPException(status_code=422, detail="Técnica inválida (debe ser MT o PMI)")
 
     try:
-        ots = read_sheet_as_dicts(BD_SPREADSHEET_ID, "work_orders")
-        if not any(r.get("id_ot", "").strip() == id_ot for r in ots):
-            raise HTTPException(status_code=404, detail=f"No existe la OT '{id_ot}'")
+        if id_ot:
+            ots = read_sheet_as_dicts(BD_SPREADSHEET_ID, "work_orders")
+            if not any(r.get("id_ot", "").strip() == id_ot for r in ots):
+                raise HTTPException(status_code=404, detail=f"No existe la OT '{id_ot}'")
 
         id_servicio = f"SRV-{uuid.uuid4().hex[:8].upper()}"
         append_row(

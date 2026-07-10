@@ -814,11 +814,13 @@ export async function fetchServicios(idOt?: string): Promise<RealServicio[]> {
   return res.json();
 }
 
-export async function crearServicio(idOt: string, tecnica: Tecnica): Promise<{ idServicio: string }> {
+// idOt es OPCIONAL (pedido 2026-07-10: "no es obligatoria la ot") — un
+// servicio se puede crear suelto, sin OT asociada.
+export async function crearServicio(tecnica: Tecnica, idOt?: string): Promise<{ idServicio: string }> {
   const res = await fetch(`${PREVIEW_API_BASE}/api/preview/servicios`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idOt, tecnica }),
+    body: JSON.stringify({ idOt: idOt || undefined, tecnica }),
   });
   if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo crear el servicio."));
   return res.json();
