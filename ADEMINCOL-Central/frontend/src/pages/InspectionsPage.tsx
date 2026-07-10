@@ -136,20 +136,21 @@ export function InspectionsPage() {
         )}
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        {TYPE_TABS.map((t) => (
-          <button
-            key={t.code}
-            onClick={() => setTab(t.code)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-              tab === t.code
-                ? "bg-brand-600 text-white"
-                : "bg-white text-ink-600 border border-ink-200 hover:bg-ink-50"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="mb-4 max-w-xs">
+        <label className="mb-1 block text-xs font-semibold uppercase text-ink-500">
+          Técnica de inspección
+        </label>
+        <select
+          value={tab}
+          onChange={(e) => setTab(e.target.value as typeof tab)}
+          className="w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm font-medium text-ink-800 outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
+        >
+          {TYPE_TABS.map((t) => (
+            <option key={t.code} value={t.code}>
+              {t.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {tab === "MT" ? (
