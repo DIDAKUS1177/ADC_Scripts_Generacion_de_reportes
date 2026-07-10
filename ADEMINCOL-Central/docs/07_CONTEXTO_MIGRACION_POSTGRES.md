@@ -396,6 +396,48 @@ navegador que el modal nuevo tiene la misma apariencia que "Nueva OT" y
 que la sección "Servicios sin OT asociada" muestra el servicio recién
 creado.
 
+## Servicios sin OT: falta el supervisor que lo solicitó (2026-07-10)
+
+Al hacer OT opcional en la creación de un servicio (sección anterior), el
+usuario notó un problema real revisando la hoja: la fila del servicio no
+tenía forma de saber quién lo pidió — la hoja `servicios` nunca tuvo una
+columna de supervisor (a diferencia de `work_orders`, que sí la tiene desde
+el inicio). Pedido explícito: "es importante que salga el supervisor que
+solicitó el servicio."
+
+- **Columna nueva en el Sheet real**: `supervisor_usuario` agregada a
+  `servicios!L1` (antes solo tenía 11 columnas, A:K). `append_row()` solo
+  escribe columnas que ya existen en la fila de encabezados — sin este
+  paso, mandar `supervisor_usuario` en el payload se habría descartado en
+  silencio.
+- **Backend** (`POST /api/preview/servicios`): `supervisorUsuario` pasa a
+  ser obligatorio (422 si falta) — mismo criterio que `work_orders`: se
+  toma SIEMPRE del usuario autenticado que hace la petición, nunca de un
+  `<select>` a elegir.
+- **Fallback para servicios viejos con OT** (`GET /api/preview/servicios`):
+  los servicios creados antes de que existiera esta columna, pero que sí
+  tienen `id_ot`, muestran el supervisor de esa OT como respaldo (se
+  construye un diccionario `id_ot -> supervisor_usuario` leyendo
+  `work_orders` una sola vez, solo si hace falta). Los servicios viejos
+  SIN OT (2 casos de prueba creados hoy antes de este cambio) quedan sin
+  supervisor conocido — no hay forma de recuperar ese dato retroactivamente.
+- **Postgres**: `servicios.supervisor_usuario VARCHAR(50) REFERENCES
+  users(usuario)` agregada con `ALTER TABLE` en Supabase + `schema.sql`
+  actualizado; `sync_servicios()` la sincroniza.
+- **Frontend**: `RealServicio.supervisorUsuario`, `crearServicio()` cambia
+  de firma a `(tecnica, supervisorUsuario, idOt?)` — ambos call sites
+  (`NewServicioModal` y el botón rápido "+ Generar servicio X" dentro de
+  una OT) pasan `user.usuario` del contexto de auth. Se muestra "Solicitó:
+  {supervisor}" en las filas de servicios (dentro de una OT y en la
+  sección "Servicios sin OT asociada"), y el modal de creación muestra
+  "Solicitante: {nombre} (tú)" igual que el modal de OT.
+
+Verificado extremo a extremo: crear servicio sin `supervisorUsuario` da
+422; con él, se crea y aparece con el supervisor correcto; los 4 servicios
+viejos vinculados a una OT ahora muestran el supervisor de esa OT vía el
+fallback (`crojas` en los casos reales); confirmado en el navegador tanto
+en la vista expandida de una OT como en "Servicios sin OT asociada".
+
 ## Pendiente (no resuelto, anotado para no perderlo)
 
 - Conectar AppSheet directo a `pmi_general` en Postgres en vez de a la hoja de

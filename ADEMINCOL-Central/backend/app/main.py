@@ -2169,12 +2169,29 @@ def list_servicios(id_ot: str | None = None):
         logger.exception("Error leyendo hoja servicios")
         raise HTTPException(status_code=502, detail=f"No se pudo leer la BD de servicios: {e}")
 
+    # Fallback para filas viejas (creadas antes de agregar la columna
+    # `supervisor_usuario` a la hoja `servicios`, 2026-07-10): si el
+    # servicio tiene OT y no tiene supervisor propio, se usa el supervisor
+    # de esa OT — así los servicios históricos vinculados a una OT no
+    # quedan con "Solicitó: —" de la nada.
+    supervisor_por_ot: dict[str, str] = {}
+    if any(not r.get("supervisor_usuario", "").strip() and r.get("id_ot", "").strip() for r in rows):
+        try:
+            ots = read_sheet_as_dicts(BD_SPREADSHEET_ID, "work_orders")
+            supervisor_por_ot = {
+                o.get("id_ot", "").strip(): o.get("supervisor_usuario", "").strip()
+                for o in ots if o.get("id_ot", "").strip()
+            }
+        except Exception:
+            pass
+
     out = []
     for r in rows:
         if not r.get("id_servicio", "").strip():
             continue
         if id_ot and r.get("id_ot", "").strip() != id_ot:
             continue
+        supervisor = r.get("supervisor_usuario", "").strip() or supervisor_por_ot.get(r.get("id_ot", "").strip(), "")
         out.append(
             {
                 "idServicio": r.get("id_servicio"),
@@ -2182,6 +2199,7 @@ def list_servicios(id_ot: str | None = None):
                 "tecnica": r.get("tecnica"),
                 "estado": r.get("estado") or "PENDIENTE",
                 "inspectorUsuario": r.get("inspector_usuario") or None,
+                "supervisorUsuario": supervisor or None,
                 "fechaCreacion": r.get("fecha_creacion") or None,
                 "fechaInicio": r.get("fecha_inicio") or None,
                 "fechaFin": r.get("fecha_fin") or None,
@@ -2198,10 +2216,19 @@ def crear_servicio(payload: dict = Body(...)):
     # servicio se puede crear suelto y vincularse a una OT más adelante. Antes
     # el frontend rodeaba este requisito creando una OT placeholder
     # ("S/N-...") solo para poder crear el servicio; se elimina ese hack acá.
+    #
+    # supervisorUsuario es OBLIGATORIO (pedido 2026-07-10: "es importante que
+    # salga el supervisor que solicitó el servicio") — mismo criterio que
+    # work_orders: siempre se toma del usuario autenticado que hace el POST,
+    # nunca de un <select>. Columna nueva `supervisor_usuario` agregada a la
+    # hoja `servicios` (no existía, las OTs sí la tenían).
     id_ot = str(payload.get("idOt", "")).strip()
     tecnica = str(payload.get("tecnica", "")).strip().upper()
+    supervisor_usuario = str(payload.get("supervisorUsuario", "")).strip()
     if tecnica not in ("MT", "PMI"):
         raise HTTPException(status_code=422, detail="Técnica inválida (debe ser MT o PMI)")
+    if not supervisor_usuario:
+        raise HTTPException(status_code=422, detail="Falta supervisorUsuario")
 
     try:
         if id_ot:
@@ -2219,6 +2246,7 @@ def crear_servicio(payload: dict = Body(...)):
                 "tecnica": tecnica,
                 "estado": "PENDIENTE",
                 "inspector_usuario": "",  # se autoasigna en AppSheet, no aquí
+                "supervisor_usuario": supervisor_usuario,
                 "fecha_creacion": datetime.now().isoformat(timespec="seconds"),
                 "fecha_inicio": "",
                 "fecha_fin": "",

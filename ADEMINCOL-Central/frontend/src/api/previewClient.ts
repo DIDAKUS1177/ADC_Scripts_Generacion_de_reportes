@@ -800,6 +800,10 @@ export interface RealServicio {
   tecnica: Tecnica;
   estado: "PENDIENTE" | "EN_CURSO" | "COMPLETADA" | "CANCELADA";
   inspectorUsuario: string | null; // se autoasigna en AppSheet, no aquí
+  // Quién solicitó el servicio (2026-07-10, columna nueva en la hoja real)
+  // — siempre el usuario autenticado que lo crea, nunca un <select>, mismo
+  // criterio que work_orders.supervisorUsuario.
+  supervisorUsuario: string | null;
   fechaCreacion: string | null;
   fechaInicio: string | null;
   fechaFin: string | null;
@@ -815,12 +819,18 @@ export async function fetchServicios(idOt?: string): Promise<RealServicio[]> {
 }
 
 // idOt es OPCIONAL (pedido 2026-07-10: "no es obligatoria la ot") — un
-// servicio se puede crear suelto, sin OT asociada.
-export async function crearServicio(tecnica: Tecnica, idOt?: string): Promise<{ idServicio: string }> {
+// servicio se puede crear suelto, sin OT asociada. supervisorUsuario es
+// obligatorio ("es importante que salga el supervisor que solicitó el
+// servicio") — el llamador siempre debe pasar el usuario autenticado.
+export async function crearServicio(
+  tecnica: Tecnica,
+  supervisorUsuario: string,
+  idOt?: string
+): Promise<{ idServicio: string }> {
   const res = await fetch(`${PREVIEW_API_BASE}/api/preview/servicios`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ idOt: idOt || undefined, tecnica }),
+    body: JSON.stringify({ idOt: idOt || undefined, tecnica, supervisorUsuario }),
   });
   if (!res.ok) throw new PreviewApiError(await leerDetalleError(res, "No se pudo crear el servicio."));
   return res.json();

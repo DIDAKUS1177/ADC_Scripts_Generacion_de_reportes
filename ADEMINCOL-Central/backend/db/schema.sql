@@ -181,6 +181,10 @@ CREATE TABLE servicios (
     tecnica             report_type_code NOT NULL,
     estado              ot_status NOT NULL DEFAULT 'PENDIENTE',
     inspector_usuario   VARCHAR(50) REFERENCES users(usuario),  -- NULL hasta autoasignación en AppSheet
+    supervisor_usuario  VARCHAR(50) REFERENCES users(usuario),  -- quién solicitó el servicio (2026-07-10,
+                                                           -- columna agregada a la hoja real; antes no
+                                                           -- existía y un servicio sin OT quedaba sin
+                                                           -- forma de saber quién lo pidió)
     fecha_creacion      TIMESTAMPTZ NOT NULL DEFAULT now(),
     fecha_inicio        TIMESTAMPTZ,                     -- la llena AppSheet al abrir el formulario
     fecha_fin           TIMESTAMPTZ,                     -- la llena AppSheet al marcar "Finalizado"

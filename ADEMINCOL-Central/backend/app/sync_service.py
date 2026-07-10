@@ -185,11 +185,12 @@ def sync_servicios() -> int:
 
     sql = """
         INSERT INTO servicios (id_servicio, id_ot, tecnica, estado, inspector_usuario,
-                                fecha_creacion, fecha_inicio, fecha_fin, duracion_min,
-                                id_informe_generado)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                supervisor_usuario, fecha_creacion, fecha_inicio, fecha_fin,
+                                duracion_min, id_informe_generado)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (id_servicio) DO UPDATE SET
             estado = EXCLUDED.estado, inspector_usuario = EXCLUDED.inspector_usuario,
+            supervisor_usuario = EXCLUDED.supervisor_usuario,
             fecha_inicio = EXCLUDED.fecha_inicio, fecha_fin = EXCLUDED.fecha_fin,
             duracion_min = EXCLUDED.duracion_min, id_informe_generado = EXCLUDED.id_informe_generado
     """
@@ -210,6 +211,7 @@ def sync_servicios() -> int:
                     tecnica,
                     estado,
                     r.get("inspector_usuario", "").strip() or None,
+                    r.get("supervisor_usuario", "").strip() or None,  # quién lo solicitó (2026-07-10)
                     _parse_timestamp(r.get("fecha_creacion", "")),
                     _parse_timestamp(r.get("fecha_inicio", "")),
                     _parse_timestamp(r.get("fecha_fin", "")),

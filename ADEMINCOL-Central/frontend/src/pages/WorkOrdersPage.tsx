@@ -145,15 +145,17 @@ export function WorkOrdersPage() {
           </p>
           <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
             {serviciosSinOt.map((s) => (
-              <div
-                key={s.idServicio}
-                className="flex items-center justify-between rounded-md bg-white px-2.5 py-1.5 text-xs"
-              >
-                <div className="flex items-center gap-2">
-                  <Badge tone="blue">{s.tecnica}</Badge>
-                  <span className="font-mono text-ink-500">{s.idServicio}</span>
+              <div key={s.idServicio} className="rounded-md bg-white px-2.5 py-1.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Badge tone="blue">{s.tecnica}</Badge>
+                    <span className="font-mono text-ink-500">{s.idServicio}</span>
+                  </div>
+                  <OTStatusBadge status={s.estado} />
                 </div>
-                <OTStatusBadge status={s.estado} />
+                <p className="mt-1 text-[11px] text-ink-400">
+                  Solicitó: {s.supervisorUsuario ?? "—"}
+                </p>
               </div>
             ))}
           </div>
@@ -186,6 +188,7 @@ export function WorkOrdersPage() {
 }
 
 function ServiciosDeOt({ idOt, canCreate }: { idOt: string; canCreate: boolean }) {
+  const { user } = useAuth();
   const toast = useToast();
   const [servicios, setServicios] = useState<RealServicio[] | null>(null);
   const [creando, setCreando] = useState<Tecnica | null>(null);
@@ -199,9 +202,10 @@ function ServiciosDeOt({ idOt, canCreate }: { idOt: string; canCreate: boolean }
   useEffect(load, [idOt]);
 
   async function handleGenerarServicio(tecnica: Tecnica) {
+    if (!user) return;
     setCreando(tecnica);
     try {
-      await crearServicio(tecnica, idOt);
+      await crearServicio(tecnica, user.usuario, idOt);
       toast.success(`Servicio ${tecnica} generado.`);
       load();
     } catch (e) {
@@ -223,16 +227,21 @@ function ServiciosDeOt({ idOt, canCreate }: { idOt: string; canCreate: boolean }
         servicios.map((s) => (
           <div
             key={s.idServicio}
-            className="mb-1.5 flex items-center justify-between rounded-md bg-white px-2.5 py-1.5 text-xs"
+            className="mb-1.5 rounded-md bg-white px-2.5 py-1.5 text-xs"
           >
-            <div className="flex items-center gap-2">
-              <Badge tone="blue">{s.tecnica}</Badge>
-              <span className="font-mono text-ink-500">{s.idServicio}</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge tone="blue">{s.tecnica}</Badge>
+                <span className="font-mono text-ink-500">{s.idServicio}</span>
+              </div>
+              <div className="flex items-center gap-2 text-ink-500">
+                <span>{s.inspectorUsuario ?? "sin autoasignar"}</span>
+                <OTStatusBadge status={s.estado} />
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-ink-500">
-              <span>{s.inspectorUsuario ?? "sin autoasignar"}</span>
-              <OTStatusBadge status={s.estado} />
-            </div>
+            <p className="mt-1 text-[11px] text-ink-400">
+              Solicitó: {s.supervisorUsuario ?? "—"}
+            </p>
           </div>
         ))}
 
@@ -415,6 +424,7 @@ function NewServicioModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const { user } = useAuth();
   const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<{ tecnica: Tecnica; idOt: string }>({
@@ -424,9 +434,10 @@ function NewServicioModal({
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!user) return;
     setSaving(true);
     try {
-      const { idServicio } = await crearServicio(form.tecnica, form.idOt || undefined);
+      const { idServicio } = await crearServicio(form.tecnica, user.usuario, form.idOt || undefined);
       toast.success(
         form.idOt
           ? `Servicio ${idServicio} creado y vinculado a la OT.`
@@ -457,6 +468,7 @@ function NewServicioModal({
         </div>
 
         <p className="mb-4 rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-500">
+          Solicitante: <span className="font-semibold text-ink-700">{user?.nombre}</span> (tú).
           El ID del servicio se genera automáticamente. La OT es opcional — se puede
           dejar sin asociar y vincularse más adelante.
         </p>
