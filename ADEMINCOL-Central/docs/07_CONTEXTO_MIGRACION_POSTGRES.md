@@ -27,12 +27,11 @@ Conexión real: **Transaction Pooler** de Supabase (puerto 6543, usuario con for
 
 ## Esquema: qué se migró y qué no
 
-**Si migrado a Postgres** (tablas de soporte, tienen sync real):
+**Sí migrado a Postgres, con sync real** (botón "Sincronizar"):
 `users`, `work_orders`, `servicios`, `equipos_ensayo`, `personal_certificados`,
-`certificados_usuarios`, `consecutivos_reportes` — ver `backend/db/schema.sql`.
-
-**Esquema creado, sin datos todavía** (PMI, la "prueba piloto" del plan original):
-`pmi_general`, `pmi_quimica`, `pmi_durezas` — ver `backend/db/pmi_schema.sql`.
+`certificados_usuarios`, `consecutivos_reportes` — ver `backend/db/schema.sql` —
+y desde el 2026-07-10 también `pmi_general`, `pmi_quimica`, `pmi_durezas` — ver
+`backend/db/pmi_schema.sql` y la sección fechada más abajo.
 `pmi_general` es un espejo 1:1 de la hoja real `1_general` (119 columnas, incluye
 columnas con nombres que empiezan con dígito como `"1_m_procedimiento"` — en Postgres
 esas van SIEMPRE entre comillas dobles). La decisión de espejo exacto (no JSONB) fue
@@ -287,11 +286,62 @@ datos actuales porque los 2 servicios reales existentes están en
 `PENDIENTE` (ninguno `EN_CURSO` todavía) — comportamiento correcto del
 filtro, no falta nada por corregir.
 
+## Sincronización de PMI agregada al botón "Sincronizar" (2026-07-10)
+
+Pedido explícito del usuario: "Que en el apartado de sincronizar tambien
+sincronice las tablas de PMI." El esquema (`pmi_general`/`pmi_quimica`/
+`pmi_durezas`) existía desde el 2026-07-09 pero le faltaba el script de
+sync — ahora corre junto con las 7 tablas de soporte en el mismo botón
+"Sincronizar ahora" (`sync_service.py`, funciones `sync_pmi_general`/
+`sync_pmi_quimica`/`sync_pmi_durezas`, agregadas a `TABLAS_SYNC`).
+
+- **`pmi_general`**: UPSERT por `id_general` (clave natural, igual que las
+  demás tablas), construido dinámicamente a partir de una lista whitelist
+  de 119 columnas (`PMI_GENERAL_COLUMNAS`) en vez de escribir el mapeo a
+  mano — evita 119 líneas repetitivas y, si el Sheet suma una columna
+  nueva, alcanza con agregarla ahí y en `pmi_schema.sql`.
+- **`pmi_quimica`/`pmi_durezas`**: reemplazo completo por `id_general`
+  (`DELETE` + `INSERT`) en vez de UPSERT por fila — lo que importa es el
+  conjunto agregado (promedios, Carbono Equivalente, gráfico de durezas),
+  no el historial de cada fila individual; la fuente de verdad son las
+  filas ACTUALES del Sheet. Ambas se filtran contra los `id_general` reales
+  de `1_general` antes de insertar, para no violar el FK con filas
+  huérfanas (id_general borrado o mal escrito en la hoja hija).
+- **`elemento`** en `pmi_quimica`: el Sheet trae "1.12%" como texto → se
+  guarda como FRACCIÓN (0.0112), mismo criterio que `calcular_ce()` en
+  `report_engine_pmi.py`.
+- **`orden`** en `pmi_durezas` (NOT NULL, no viene en el Sheet): se asigna
+  secuencial por `id_general` en el mismo orden en que aparecen las filas
+  — coincide con cómo `report_engine_pmi.py` las va llenando en la tabla
+  del reporte (`RANGO_DUREZAS`).
+- **Parser de fecha propio para PMI** (`_parse_fecha_dmy`): la columna
+  `fecha` de `1_general` viene en formato DD/MM/YYYY (confirmado con datos
+  reales, ej. `18/03/2026` — el día 18 descarta MM/DD). Las otras 7 tablas
+  usan `_parse_fecha` (que prueba MM/DD/YYYY) — no se unificaron para no
+  arriesgar reinterpretar mal fechas de sincronizaciones ya probadas en
+  producción.
+
+**Bug de performance real encontrado al probar con datos reales**: la
+primera versión hacía un `cur.execute()` por fila (mismo patrón que las
+otras 7 tablas). Para `pmi_general` (114 filas) es imperceptible, pero
+`pmi_quimica` (2202 filas) y `pmi_durezas` (3668 filas) tardaban **varios
+minutos** por la latencia de red de cada round-trip hasta Supabase — se
+interrumpió la prueba a los 3+ minutos sin haber terminado. Corregido con
+`psycopg2.extras.execute_values` (inserción por lotes de 200-500 filas):
+las 3 tablas completas (114 + 2202 + 3668 = 5984 filas) bajaron a **8.8
+segundos** de escritura. La corrida completa desde el botón real de la UI
+(que también relee las 10 hojas de Sheets desde cero, no solo escribe)
+tardó ~1m30s — aceptable para un botón manual de administrador, no es un
+flujo automático de alta frecuencia.
+
+Verificado extremo a extremo: `POST /api/preview/sync` real devuelve
+`{pmi_general: 114, pmi_quimica: 2202, pmi_durezas: 3668, ...}` junto con
+las 7 tablas anteriores, `totalFilas: 6330`, sin errores; probado también
+haciendo clic en "Ejecutar ahora" desde el navegador — el historial de
+`/sync` muestra el desglose por tabla al expandir la corrida.
+
 ## Pendiente (no resuelto, anotado para no perderlo)
 
-- Migrar datos reales de PMI (Sheets → `pmi_general`/`pmi_quimica`/`pmi_durezas`) —
-  el esquema ya existe, falta el script de sync (sería el 4º después de
-  usuarios/equipos/certificados/consecutivos).
 - Conectar AppSheet directo a `pmi_general` en Postgres en vez de a la hoja de
   Sheets — es el objetivo final de haber hecho el espejo 1:1, todavía no se hizo
   (requiere configurar esto DENTRO de AppSheet, no es código).
