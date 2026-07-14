@@ -307,6 +307,45 @@ def _buscar_firma_usuario(nombre_inspector: str) -> str | None:
     return None
 
 
+def _resolver_bloque_firma(fila_general: dict, overrides: dict, prefijo: str):
+    """Resuelve un bloque de firma (ej. 'revisor', 'aprobador') con el mismo
+    patrón de dos vías ya usado para 'supervisor' en PMI/Espesores (decisión
+    2026-07-08): override manual (<prefijo>_nombre_manual/_cargo_manual/
+    _certificado_manual/_firma_manual) tiene prioridad sobre la selección de
+    un usuario YA registrado en la plataforma (<prefijo>_usuario), resuelta
+    contra la hoja `usuarios`. Escribe fila_general[f'{prefijo}_nombre'],
+    '_cargo', '_certificado', '_firma_link' — que los report_engine_*.py
+    leen directamente. Pedido explícito del usuario 2026-07-14: dar libertad
+    de elegir quién revisa/aprueba cada reporte de 570 y Espesores."""
+    manual_nombre = str(overrides.get(f"{prefijo}_nombre_manual", "")).strip()
+    if manual_nombre:
+        fila_general[f"{prefijo}_nombre"] = manual_nombre
+        manual_cargo = str(overrides.get(f"{prefijo}_cargo_manual", "")).strip()
+        if manual_cargo:
+            fila_general[f"{prefijo}_cargo"] = manual_cargo
+        manual_certificado = str(overrides.get(f"{prefijo}_certificado_manual", "")).strip()
+        if manual_certificado:
+            fila_general[f"{prefijo}_certificado"] = manual_certificado
+        manual_firma = str(overrides.get(f"{prefijo}_firma_manual", "")).strip()
+        if manual_firma:
+            fila_general[f"{prefijo}_firma_link"] = manual_firma
+        return
+
+    usuario = overrides.get(f"{prefijo}_usuario")
+    if not usuario:
+        return
+    try:
+        usuarios_bd = read_sheet_as_dicts(BD_SPREADSHEET_ID, "usuarios")
+        u = next((x for x in usuarios_bd if x.get("usuario", "").strip() == str(usuario).strip()), None)
+        if u:
+            fila_general[f"{prefijo}_nombre"] = u.get("nombre")
+            fila_general[f"{prefijo}_cargo"] = u.get("cargo")
+            fila_general[f"{prefijo}_certificado"] = u.get("certificado")
+            fila_general[f"{prefijo}_firma_link"] = u.get("firma") or u.get("firma_link")
+    except Exception:
+        logger.warning("No se pudo cargar datos de '%s' para el bloque '%s'", usuario, prefijo)
+
+
 def _generar_bytes_mt(id_informe: str, overrides: dict, progreso=None) -> tuple[bytes, str, list[str]]:
     """Lógica pura de generación de UN reporte MT — separada del job
     asíncrono para poder reutilizarla también en la generación por lote
@@ -769,6 +808,12 @@ def _generar_bytes_570(id_api570: str, overrides: dict, progreso=None) -> tuple[
 
     _aplicar_overrides(fila_general, overrides)
 
+    # Bloques "REVISADO POR" (Y165-169) y "APROBADO POR" (AN165-169) — ver
+    # report_engine_570.py y _resolver_bloque_firma arriba.
+    overrides = overrides or {}
+    _resolver_bloque_firma(fila_general, overrides, "revisor")
+    _resolver_bloque_firma(fila_general, overrides, "aprobador")
+
     firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
     if firma_bd:
         fila_general["link_firma"] = firma_bd
@@ -1145,6 +1190,11 @@ def _generar_bytes_espesores(id_general: str, overrides: dict, progreso=None) ->
                     fila_general["supervisor_firma_link"] = u.get("firma") or u.get("firma_link")
             except Exception:
                 logger.warning("No se pudo cargar datos del supervisor '%s'", supervisor_usuario)
+
+    # Bloque "APROBADO POR" (AC40-44, ver report_engine_espesores.py) — mismo
+    # patrón de dos vías que el bloque "REVISADO POR" arriba, generalizado
+    # con _resolver_bloque_firma (pedido explícito del usuario 2026-07-14).
+    _resolver_bloque_firma(fila_general, overrides, "aprobador")
 
     firma_bd = _buscar_firma_usuario(fila_general.get("nombre", ""))
     if firma_bd:

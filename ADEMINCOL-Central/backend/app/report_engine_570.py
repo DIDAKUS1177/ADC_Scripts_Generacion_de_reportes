@@ -16,7 +16,9 @@ potencial que no se replica en este motor.
 """
 import io
 import logging
+import re
 from copy import copy
+from datetime import datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -37,6 +39,20 @@ CELDAS_GENERALES = {
 }
 CELDA_FIRMA = "J165"
 CELDAS_FIRMA_TEXTO = {"nombre": "J166", "cargo": "J167", "certificacion": "J168", "fecha": "J169"}
+
+# Bloques "REVISADO POR" (columna Y) y "APROBADO POR" (columna AN), fila
+# 164-169 — mismas filas que "REALIZADO POR" (columna J), verificado contra
+# la plantilla real el 2026-07-14 (Y165:AM165 y AN165:BB165 son celdas
+# combinadas vacías en la plantilla, listas para llenarse). Pedido explícito
+# del usuario: dar libertad de elegir quién revisa/aprueba cada reporte
+# (usuario registrado en la plataforma o datos manuales) — resuelto en
+# main.py (_generar_bytes_570) contra 'revisor_*'/'aprobador_*' en
+# fila_general. La fecha de cada bloque es SIEMPRE automática (hoy), nunca
+# viene de overrides.
+CELDA_FIRMA_REVISOR = "Y165"
+CELDAS_TEXTO_REVISOR = {"nombre": "Y166", "cargo": "Y167", "certificado": "Y168", "fecha": "Y169"}
+CELDA_FIRMA_APROBADOR = "AN165"
+CELDAS_TEXTO_APROBADOR = {"nombre": "AN166", "cargo": "AN167", "certificado": "AN168", "fecha": "AN169"}
 
 # Traducido literal de SECTIONS_CONFIG en APP011_Tub_570_VT.js (2026-07-03)
 SECTIONS_CONFIG = {
@@ -118,6 +134,17 @@ SECTIONS_CONFIG = {
 }
 
 SECTION_KEYS_ORDEN = list(SECTIONS_CONFIG.keys())
+
+
+def _col_fila(celda: str) -> tuple[str, int]:
+    """Separa una referencia de celda en (columna, fila) — a diferencia de
+    `celda[0]`/`celda[1:]` (usado en CELDA_FIRMA/CELDAS_FIRMA_TEXTO, columna
+    J, siempre de una sola letra), soporta columnas de dos letras como 'AN'
+    (bug encontrado 2026-07-14 al agregar el bloque "Aprobado por": 'AN165'
+    partido con `celda[0]`/`celda[1:]` daba columna 'A' y "N165", que no es
+    un entero)."""
+    m = re.match(r"([A-Z]+)(\d+)", celda)
+    return m.group(1), int(m.group(2))
 
 
 def _insertar_filas_y_ajustar_alturas(ws, pos: int, n: int):
@@ -296,6 +323,28 @@ def generar_reporte_570(
             col = celda[0]
             fila = int(celda[1:]) + filas_acumuladas
             ws[f"{col}{fila}"] = valor_tipado(valor)
+
+    _reportar(94, "Insertando revisor y aprobador")
+    for prefijo, celda_firma, celdas_texto in (
+        ("revisor", CELDA_FIRMA_REVISOR, CELDAS_TEXTO_REVISOR),
+        ("aprobador", CELDA_FIRMA_APROBADOR, CELDAS_TEXTO_APROBADOR),
+    ):
+        nombre = fila_general.get(f"{prefijo}_nombre")
+        if not nombre:
+            continue
+        col_nom, fila_nom = _col_fila(celdas_texto["nombre"])
+        ws[f"{col_nom}{fila_nom + filas_acumuladas}"] = valor_tipado(nombre)
+        for campo in ("cargo", "certificado"):
+            valor = fila_general.get(f"{prefijo}_{campo}")
+            if valor:
+                col_c, fila_c = _col_fila(celdas_texto[campo])
+                ws[f"{col_c}{fila_c + filas_acumuladas}"] = valor_tipado(valor)
+        col_f, fila_f = _col_fila(celdas_texto["fecha"])
+        ws[f"{col_f}{fila_f + filas_acumuladas}"] = datetime.now().strftime("%Y-%m-%d")
+        firma_bytes_bloque = descargar_imagen(fila_general.get(f"{prefijo}_firma_link", ""))
+        if firma_bytes_bloque:
+            col_fi, fila_fi = _col_fila(celda_firma)
+            insertar_imagen_centrada(ws, firma_bytes_bloque, f"{col_fi}{fila_fi + filas_acumuladas}")
 
     _reportar(97, "Guardando archivo")
     buffer = io.BytesIO()

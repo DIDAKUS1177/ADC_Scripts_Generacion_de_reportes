@@ -4,9 +4,11 @@ import {
   downloadJobResult,
   fetchReal570InspectionDetail,
   fetchReal570Inspections,
+  fetchRealUsers,
   getJobStatus,
   startReportJob,
   PreviewApiError,
+  type RealUser,
   type Sh570PreviewDetail,
   type Sh570PreviewItem,
 } from "../../api/previewClient";
@@ -14,6 +16,7 @@ import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
 import { AdvertenciasCell } from "../ui/AdvertenciasCell";
 import { useToast } from "../ui/Toast";
+import { useAuth } from "../../context/AuthContext";
 import { useBatchGeneration } from "./useBatchGeneration";
 import { BatchGenerationStatus } from "./BatchGenerationStatus";
 import { FotosPorSeccion } from "./FotosPorSeccion";
@@ -26,6 +29,7 @@ import { FotosPorSeccion } from "./FotosPorSeccion";
 // MT/PMI. `ot` es texto libre (no requiere OT creada en la plataforma).
 export function Real570InspectionsPanel() {
   const toast = useToast();
+  const { user } = useAuth();
   const [items, setItems] = useState<Sh570PreviewItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -36,6 +40,22 @@ export function Real570InspectionsPanel() {
   const pollRef = useRef<number | null>(null);
   const [query, setQuery] = useState("");
   const batchGen = useBatchGeneration("570");
+
+  // Bloques "Revisado por" (Y165-169) y "Aprobado por" (AN165-169) — pedido
+  // explícito del usuario 2026-07-14: libertad de elegir, entre los usuarios
+  // registrados en la plataforma, quién revisa y quién aprueba cada
+  // reporte. Vacío = no se llena ese bloque en el .xlsx.
+  const [usuarios, setUsuarios] = useState<RealUser[]>([]);
+  const [revisorUsuario, setRevisorUsuario] = useState("");
+  const [aprobadorUsuario, setAprobadorUsuario] = useState("");
+  useEffect(() => {
+    fetchRealUsers()
+      .then(setUsuarios)
+      .catch(() => setUsuarios([]));
+  }, []);
+  useEffect(() => {
+    if (user?.usuario && !revisorUsuario) setRevisorUsuario(user.usuario);
+  }, [user, revisorUsuario]);
 
   const filtered = useMemo(() => {
     if (!items) return null;
@@ -76,7 +96,11 @@ export function Real570InspectionsPanel() {
     if (!selected || job) return;
     setJob({ pct: 0, etapa: "Iniciando..." });
     try {
-      const jobId = await startReportJob("570", selected, edits);
+      const jobId = await startReportJob("570", selected, {
+        ...edits,
+        revisor_usuario: revisorUsuario,
+        aprobador_usuario: aprobadorUsuario,
+      });
       pollRef.current = window.setInterval(async () => {
         try {
           const status = await getJobStatus(jobId);
@@ -232,13 +256,47 @@ export function Real570InspectionsPanel() {
                 </p>
               </div>
               {!job && (
-                <button
-                  onClick={handleGenerar}
-                  className="flex shrink-0 items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
-                >
-                  <Download size={14} />
-                  Generar reporte (.xlsx)
-                </button>
+                <div className="flex shrink-0 items-end gap-2">
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-medium text-ink-500">Revisor</span>
+                    <select
+                      value={revisorUsuario}
+                      onChange={(e) => setRevisorUsuario(e.target.value)}
+                      className="rounded-lg border border-ink-200 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
+                    >
+                      <option value="">— Ninguno —</option>
+                      {usuarios.map((u) => (
+                        <option key={u.usuario} value={u.usuario}>
+                          {u.nombre}
+                          {u.usuario === user?.usuario ? " (tú)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-medium text-ink-500">Aprobador</span>
+                    <select
+                      value={aprobadorUsuario}
+                      onChange={(e) => setAprobadorUsuario(e.target.value)}
+                      className="rounded-lg border border-ink-200 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
+                    >
+                      <option value="">— Ninguno —</option>
+                      {usuarios.map((u) => (
+                        <option key={u.usuario} value={u.usuario}>
+                          {u.nombre}
+                          {u.usuario === user?.usuario ? " (tú)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    onClick={handleGenerar}
+                    className="flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+                  >
+                    <Download size={14} />
+                    Generar reporte (.xlsx)
+                  </button>
+                </div>
               )}
             </div>
 

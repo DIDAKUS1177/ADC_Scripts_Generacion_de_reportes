@@ -4,11 +4,13 @@ import {
   downloadJobResult,
   fetchRealEspesoresInspectionDetail,
   fetchRealEspesoresInspections,
+  fetchRealUsers,
   getJobStatus,
   startReportJob,
   PreviewApiError,
   type EspesoresPreviewDetail,
   type EspesoresPreviewItem,
+  type RealUser,
 } from "../../api/previewClient";
 import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
@@ -38,6 +40,22 @@ export function RealEspesoresInspectionsPanel() {
   const [query, setQuery] = useState("");
   const [showLoteModal, setShowLoteModal] = useState(false);
   const batchGen = useBatchGeneration("espesores");
+
+  // Bloques "Revisado por" (P40-44) y "Aprobado por" (AC40-44) — pedido
+  // explícito del usuario 2026-07-14: libertad de elegir, entre los usuarios
+  // registrados en la plataforma, quién revisa y quién aprueba cada
+  // reporte (antes "Revisado por" quedaba fijo en el usuario autenticado).
+  const [usuarios, setUsuarios] = useState<RealUser[]>([]);
+  const [revisorUsuario, setRevisorUsuario] = useState("");
+  const [aprobadorUsuario, setAprobadorUsuario] = useState("");
+  useEffect(() => {
+    fetchRealUsers()
+      .then(setUsuarios)
+      .catch(() => setUsuarios([]));
+  }, []);
+  useEffect(() => {
+    if (user?.usuario && !revisorUsuario) setRevisorUsuario(user.usuario);
+  }, [user, revisorUsuario]);
 
   const filtered = useMemo(() => {
     if (!items) return null;
@@ -80,7 +98,8 @@ export function RealEspesoresInspectionsPanel() {
     try {
       const jobId = await startReportJob("espesores", selected, {
         ...edits,
-        supervisor_usuario: user?.usuario ?? "",
+        supervisor_usuario: revisorUsuario || user?.usuario || "",
+        aprobador_usuario: aprobadorUsuario,
       });
       pollRef.current = window.setInterval(async () => {
         try {
@@ -235,13 +254,47 @@ export function RealEspesoresInspectionsPanel() {
                 </p>
               </div>
               {!job && (
-                <button
-                  onClick={handleGenerar}
-                  className="flex shrink-0 items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
-                >
-                  <Download size={14} />
-                  Generar reporte (.xlsx)
-                </button>
+                <div className="flex shrink-0 items-end gap-2">
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-medium text-ink-500">Revisor</span>
+                    <select
+                      value={revisorUsuario}
+                      onChange={(e) => setRevisorUsuario(e.target.value)}
+                      className="rounded-lg border border-ink-200 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
+                    >
+                      <option value="">— Ninguno —</option>
+                      {usuarios.map((u) => (
+                        <option key={u.usuario} value={u.usuario}>
+                          {u.nombre}
+                          {u.usuario === user?.usuario ? " (tú)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-medium text-ink-500">Aprobador</span>
+                    <select
+                      value={aprobadorUsuario}
+                      onChange={(e) => setAprobadorUsuario(e.target.value)}
+                      className="rounded-lg border border-ink-200 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
+                    >
+                      <option value="">— Ninguno —</option>
+                      {usuarios.map((u) => (
+                        <option key={u.usuario} value={u.usuario}>
+                          {u.nombre}
+                          {u.usuario === user?.usuario ? " (tú)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    onClick={handleGenerar}
+                    className="flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+                  >
+                    <Download size={14} />
+                    Generar reporte (.xlsx)
+                  </button>
+                </div>
               )}
             </div>
 

@@ -88,6 +88,17 @@ CELDA_CARGO_SUPERVISOR = "P42"
 CELDA_CERTIFICADO_SUPERVISOR = "P43"
 CELDA_FECHA_SUPERVISOR = "P44"
 
+# Columna 3 (AC40:AC44, "APROBADO POR") — pedido explícito del usuario
+# 2026-07-14, mismo patrón que la columna 2 (REVISADO POR): usuario
+# registrado en la plataforma o datos manuales, resuelto en main.py
+# (_generar_bytes_espesores) contra 'aprobador_*' en fila_general. La fecha
+# es siempre automática (hoy).
+CELDA_FIRMA_APROBADOR = "AC40"
+CELDA_NOMBRE_APROBADOR = "AC41"
+CELDA_CARGO_APROBADOR = "AC42"
+CELDA_CERTIFICADO_APROBADOR = "AC43"
+CELDA_FECHA_APROBADOR = "AC44"
+
 # Tabla de lecturas: capacidad nativa de 2 filas (34-35, igual que MT) —
 # confirmado por la fórmula de conteo AG31 (`COUNT(J34:Y35)`, fija a esas 2
 # filas igual que en el GAS: no se actualiza al insertar filas, limitación
@@ -110,6 +121,15 @@ COLUMNAS_FORMULA_LECTURAS = ["Z", "AB", "AD", "AF", "AH"]
 # descripción (alto 19.5px) por bloque — confirmado contra la plantilla.
 FILA_INICIO_FOTOS = 37
 COLUMNAS_FOTOS = ["A", "N", "AA"]
+
+
+def _col_fila(celda: str) -> tuple[str, int]:
+    """Separa una referencia de celda en (columna, fila) — soporta columnas
+    de dos letras como 'AC' (bug encontrado 2026-07-14 en report_engine_570.py
+    al agregar un bloque de firma en columna de dos letras: `celda[0]`/
+    `celda[1:]` asume una sola letra de columna)."""
+    m = re.match(r"([A-Z]+)(\d+)", celda)
+    return m.group(1), int(m.group(2))
 
 
 def _ajustar_formula_por_fila(formula: str, fila_origen: int, fila_destino: int) -> str:
@@ -330,6 +350,24 @@ def generar_reporte_espesores(
         if firma_supervisor_bytes:
             col_fs, fila_fs = CELDA_FIRMA_SUPERVISOR[0], int(CELDA_FIRMA_SUPERVISOR[1:]) + filas_extra
             insertar_imagen_centrada(ws, firma_supervisor_bytes, f"{col_fs}{fila_fs}")
+
+    aprobador_nombre = fila_general.get("aprobador_nombre")
+    if aprobador_nombre:
+        _reportar(96, "Escribiendo datos del aprobador")
+        col_nom, fila_nom = _col_fila(CELDA_NOMBRE_APROBADOR)
+        ws[f"{col_nom}{fila_nom + filas_extra}"] = aprobador_nombre
+        if fila_general.get("aprobador_cargo"):
+            col_c, fila_c = _col_fila(CELDA_CARGO_APROBADOR)
+            ws[f"{col_c}{fila_c + filas_extra}"] = fila_general["aprobador_cargo"]
+        if fila_general.get("aprobador_certificado"):
+            col_ce, fila_ce = _col_fila(CELDA_CERTIFICADO_APROBADOR)
+            ws[f"{col_ce}{fila_ce + filas_extra}"] = fila_general["aprobador_certificado"]
+        col_f, fila_f = _col_fila(CELDA_FECHA_APROBADOR)
+        ws[f"{col_f}{fila_f + filas_extra}"] = datetime.now().strftime("%Y-%m-%d")
+        firma_aprobador_bytes = descargar_imagen(fila_general.get("aprobador_firma_link", ""))
+        if firma_aprobador_bytes:
+            col_fs, fila_fs = _col_fila(CELDA_FIRMA_APROBADOR)
+            insertar_imagen_centrada(ws, firma_aprobador_bytes, f"{col_fs}{fila_fs + filas_extra}")
 
     _reportar(97, "Guardando archivo")
     buffer = io.BytesIO()

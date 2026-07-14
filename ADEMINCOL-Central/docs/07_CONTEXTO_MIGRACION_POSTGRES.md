@@ -576,6 +576,59 @@ columna que se pueda filtrar."
   pestaña Certificados muestra su propia fila de filtros, y no hay errores de
   consola. `npx tsc --noEmit` sin errores.
 
+## 570: bloques Revisado por/Aprobado por — Espesores: bloque Aprobado por (2026-07-14)
+
+Pedido explícito: en 570, "que al seleccionar bastante, me dé la libertad de
+colocar el revisado por" en Y165 (firma)/Y166 (nombre)/Y167 (cargo)/Y168
+(certificado)/Y169 (fecha, automática) — y lo mismo para "Aprobado por" en la
+columna AN (AN165-169). En Espesores, mismo patrón para "Revisado por" (ya
+existía en P40-44) y agregar "Aprobado por" en AC40-44.
+
+- `report_engine_570.py`: nuevos bloques `CELDA_FIRMA_REVISOR`/
+  `CELDAS_TEXTO_REVISOR` (Y165-169) y `CELDA_FIRMA_APROBADOR`/
+  `CELDAS_TEXTO_APROBADOR` (AN165-169), verificados contra la plantilla real
+  (celdas combinadas vacías, listas para llenarse). Se leen de
+  `fila_general['revisor_*']`/`'aprobador_*'` (nombre/cargo/certificado/
+  firma_link); la fecha siempre es `datetime.now()`, nunca viene de overrides.
+- `report_engine_espesores.py`: nuevo bloque `CELDA_FIRMA_APROBADOR`/
+  `CELDA_NOMBRE_APROBADOR`/etc. (AC40-44), mismo patrón que el bloque
+  "Revisado por" (P40-44) que ya existía desde antes.
+- `main.py`: nuevo helper `_resolver_bloque_firma(fila_general, overrides,
+  prefijo)` — generaliza el patrón de dos vías ya usado para `supervisor_*`
+  en PMI/Espesores (override manual `<prefijo>_nombre_manual`/etc. con
+  prioridad sobre `<prefijo>_usuario` resuelto contra la hoja `usuarios`).
+  Usado en `_generar_bytes_570` (revisor + aprobador) y
+  `_generar_bytes_espesores` (aprobador; el bloque "revisor" de Espesores
+  sigue usando el nombre histórico `supervisor_*`, sin renombrar, para no
+  romper el modal de lote ya en producción).
+- Frontend: `Real570InspectionsPanel.tsx` y `RealEspesoresInspectionsPanel.tsx`
+  ganan selects "Revisor"/"Aprobador" (usuarios registrados en la
+  plataforma, con opción "— Ninguno —") junto al botón "Generar reporte",
+  mismo patrón ya usado en PMI.
+- **Bug encontrado y corregido durante la verificación**: el primer intento
+  de escribir en columnas de dos letras (AN, AC) usaba `celda[0]`/`celda[1:]`
+  para separar columna/fila — funciona para columnas de una letra (J, P, Y)
+  pero rompe con "AN165" (da columna "A" y fila "N165", que no es un
+  entero). Corregido con un helper `_col_fila(celda)` basado en regex
+  (`re.match(r"([A-Z]+)(\d+)", celda)`) en ambos motores.
+- **Segundo problema, de infraestructura, no de código**: la verificación end
+  to end falló varias veces con el mismo error viejo pese a haber corregido
+  el bug — causa real: un proceso `python3.11.exe` huérfano (hijo del
+  reloader de `uvicorn --reload` de una sesión anterior) seguía escuchando
+  en el puerto 8000 y respondiendo con el código viejo, mientras
+  `Get-Process`/`tasklist` no lo listaban por PID (gotcha ya documentado en
+  memoria de esta sesión: los procesos `python3.11.exe` a veces no aparecen
+  con las mismas herramientas que `python.exe`). Se identificó vía
+  `Get-NetTCPConnection -LocalPort 8000` (mostraba el PID real del
+  listener) y se mató con `Stop-Process -Id <pid> -Force`.
+- Verificado con datos reales vía `curl` directo al backend (no solo en el
+  navegador): reporte de 570 (`Reporte_api570_c06ab277`) con revisor="admin"
+  (Diego Alejandro Hernandez) y aprobador="angela" (Angela Suarez) — Y166-169
+  y AN166-169 quedaron con nombre/cargo/certificado/fecha correctos.
+  Reporte de Espesores (`REPORT_SCAN9556eeca`) con los mismos overrides —
+  P49-52 y AC49-52 (offset +9 filas por lecturas/fotos insertadas) quedaron
+  correctos. `npx tsc --noEmit` sin errores.
+
 ## Pendiente (no resuelto, anotado para no perderlo)
 
 - Conectar AppSheet directo a `pmi_general` en Postgres en vez de a la hoja de
