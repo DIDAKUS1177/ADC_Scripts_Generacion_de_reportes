@@ -551,6 +551,31 @@ texto real en MT/PMI; selector de revisor con usuarios reales (incluye "—
 sin firma cargada" cuando aplica) funcionando en ambos modales de PMI. Sin
 errores de consola en ningún caso.
 
+## EquiposPage: se quita el tab "Usuarios de la webapp" y se agregan filtros por columna (2026-07-14)
+
+Pedido explícito: "En la parte de equipos, donde sale usuarios webapp elimina esa
+parte... que se pueda filtrar desde cada tabla osea que debajo del enunciado de la
+columna que se pueda filtrar."
+
+- `EquiposPage.tsx`: se eliminó por completo el tab `personal` ("Usuarios de la
+  webapp") — el componente `PersonalUsuariosTab`, el modal `CertificatesModal`, y su
+  entrada en `TABS`. `Tab` ahora es solo `"equipos" | "roster"` y el tab por defecto
+  pasa a ser `"equipos"`. Las funciones `fetchRealUsers`/`fetchUserCertificates`/
+  `updateUserCertificates` siguen existiendo en `previewClient.ts` y se usan en
+  `UsersPage.tsx` y en el selector de revisor de PMI — no se tocaron, solo se dejaron
+  de importar en `EquiposPage.tsx`.
+- En `EquiposFisicosTab` y `CertificadosTab`: se reemplazó la barra de filtros de
+  arriba de la tabla (buscador + selects sueltos) por una segunda fila dentro del
+  `<thead>`, con un input o select de filtro debajo de cada encabezado de columna
+  (Categoría, Equipo, Serie, Serial ADC, Vencimiento, Observaciones, Estado en
+  Equipos físicos; Nombre, CC, Técnica, Nivel, # Certificado, Estado en
+  Certificados). Cada filtro es un estado independiente (`filtroCategoria`,
+  `filtroEquipo`, `filtroSerie`, etc.) que entra al `useMemo` de `filtered`.
+- Verificado en navegador (`localhost:5174/equipos`): el tab "Usuarios de la webapp"
+  ya no aparece, el filtro de categoría "MT" filtra la tabla correctamente, la
+  pestaña Certificados muestra su propia fila de filtros, y no hay errores de
+  consola. `npx tsc --noEmit` sin errores.
+
 ## Pendiente (no resuelto, anotado para no perderlo)
 
 - Conectar AppSheet directo a `pmi_general` en Postgres en vez de a la hoja de

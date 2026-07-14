@@ -1,25 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Award,
-  Search,
   X,
   Loader2,
   Plus,
   Trash2,
   Save,
-  ShieldCheck,
-  Signature,
   Wrench,
-  Users2,
   Power,
   Clock,
   Sun,
   Moon,
 } from "lucide-react";
 import {
-  fetchRealUsers,
-  fetchUserCertificates,
-  updateUserCertificates,
   fetchRealEquipos,
   crearEquipo,
   actualizarEquipo,
@@ -28,8 +21,6 @@ import {
   crearCertificadoPersonal,
   actualizarCertificadoPersonal,
   borrarCertificadoPersonal,
-  type RealUser,
-  type UserCertificate,
   type RealEquipo,
   type PersonalCertificado,
   type NewPersonalCertificadoPayload,
@@ -37,14 +28,12 @@ import {
 import { Spinner, ErrorState, EmptyState } from "../components/ui/States";
 import { Badge } from "../components/ui/Badge";
 import { useToast } from "../components/ui/Toast";
-import { ROLE_LABEL } from "../components/layout/navConfig";
 import { ComboSelect } from "../components/ui/ComboSelect";
 import { useTheme } from "../context/ThemeContext";
 
-type Tab = "personal" | "equipos" | "roster";
+type Tab = "equipos" | "roster";
 
-const TABS: { code: Tab; label: string; icon: typeof Users2 }[] = [
-  { code: "personal", label: "Usuarios de la webapp", icon: Users2 },
+const TABS: { code: Tab; label: string; icon: typeof Wrench }[] = [
   { code: "equipos", label: "Equipos físicos", icon: Wrench },
   { code: "roster", label: "Certificados", icon: Award },
 ];
@@ -128,7 +117,7 @@ function ThemeToggle() {
 }
 
 export function EquiposPage() {
-  const [tab, setTab] = useState<Tab>("personal");
+  const [tab, setTab] = useState<Tab>("equipos");
 
   return (
     <div className="dark:text-ink-100">
@@ -166,296 +155,8 @@ export function EquiposPage() {
         })}
       </div>
 
-      {tab === "personal" && <PersonalUsuariosTab />}
       {tab === "equipos" && <EquiposFisicosTab />}
       {tab === "roster" && <CertificadosTab />}
-    </div>
-  );
-}
-
-// =====================================================================
-// Tab 1: Usuarios de la webapp — comportamiento original (certificados_usuarios)
-// =====================================================================
-function PersonalUsuariosTab() {
-  const [users, setUsers] = useState<RealUser[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [selectedUser, setSelectedUser] = useState<RealUser | null>(null);
-
-  function load() {
-    setError(null);
-    setUsers(null);
-    fetchRealUsers()
-      .then(setUsers)
-      .catch((e) =>
-        setError(e instanceof Error ? e.message : "No se pudo cargar la lista del equipo.")
-      );
-  }
-
-  useEffect(load, []);
-
-  const filtered = useMemo(() => {
-    if (!users) return [];
-    const q = query.trim().toLowerCase();
-    return users.filter(
-      (u) => !q || u.nombre.toLowerCase().includes(q) || u.usuario.toLowerCase().includes(q)
-    );
-  }, [users, query]);
-
-  return (
-    <div>
-      <div className="mb-4">
-        <div className="relative max-w-sm">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar inspector por nombre o usuario..."
-            className="w-full rounded-lg border border-ink-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
-          />
-        </div>
-      </div>
-
-      {users === null && !error && <Spinner label="Cargando equipo..." />}
-      {error && <ErrorState message={error} onRetry={load} />}
-
-      {users !== null && filtered.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {filtered.map((u) => (
-            <div
-              key={u.idUsuario}
-              className="flex flex-col rounded-xl border border-ink-200 bg-white p-4 shadow-sm hover:border-brand-300 transition-colors"
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="font-semibold text-ink-900">{u.nombre}</h3>
-                  <p className="text-xs text-ink-500">{u.usuario}</p>
-                </div>
-                <Badge tone={u.activo ? "green" : "gray"}>{u.activo ? "Activo" : "Inactivo"}</Badge>
-              </div>
-
-              <div className="mt-3 flex items-center gap-2 text-xs text-ink-600">
-                <ShieldCheck size={14} className="text-ink-400" />
-                <span>
-                  {ROLE_LABEL[u.rol]} {u.cargo ? `· ${u.cargo}` : ""}
-                </span>
-              </div>
-
-              <div className="mt-1 flex items-center gap-2 text-xs text-ink-600">
-                <Signature size={14} className="text-ink-400" />
-                <span>Firma: {u.tieneFirma ? "Registrada" : "Pendiente"}</span>
-              </div>
-
-              <div className="mt-4 pt-4 border-t border-ink-100 mt-auto">
-                <button
-                  onClick={() => setSelectedUser(u)}
-                  className="w-full flex items-center justify-center gap-2 rounded-lg bg-ink-50 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50"
-                >
-                  <Award size={16} /> Gestionar Certificados
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {selectedUser && <CertificatesModal user={selectedUser} onClose={() => setSelectedUser(null)} />}
-    </div>
-  );
-}
-
-function CertificatesModal({ user, onClose }: { user: RealUser; onClose: () => void }) {
-  const toast = useToast();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [certs, setCerts] = useState<UserCertificate[]>([]);
-
-  useEffect(() => {
-    fetchUserCertificates(user.usuario)
-      .then((data) => {
-        setCerts(data);
-        setLoading(false);
-      })
-      .catch(() => {
-        toast.error("Error cargando certificados");
-        setLoading(false);
-      });
-  }, [user.usuario, toast]);
-
-  function addCert() {
-    setCerts([
-      ...certs,
-      {
-        usuario: user.usuario,
-        tecnica: "",
-        nombreCertificado: "",
-        entidadEmisora: "",
-        fechaEmision: "",
-        fechaVencimiento: "",
-        linkPdf: "",
-      },
-    ]);
-  }
-
-  function removeCert(index: number) {
-    const newCerts = [...certs];
-    newCerts.splice(index, 1);
-    setCerts(newCerts);
-  }
-
-  function updateCert(index: number, field: keyof UserCertificate, value: string) {
-    const newCerts = [...certs];
-    newCerts[index] = { ...newCerts[index], [field]: value };
-    setCerts(newCerts);
-  }
-
-  async function handleSave() {
-    for (const c of certs) {
-      if (!c.nombreCertificado.trim()) {
-        toast.error("El nombre del certificado es obligatorio.");
-        return;
-      }
-      if (!c.tecnica) {
-        toast.error("Cada certificado debe indicar a qué técnica corresponde (MT, PMI...).");
-        return;
-      }
-    }
-
-    setSaving(true);
-    try {
-      await updateUserCertificates(user.usuario, certs);
-      toast.success("Certificados actualizados exitosamente.");
-      onClose();
-    } catch (e) {
-      toast.error("No se pudieron guardar los certificados.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-ink-100 p-5">
-          <div>
-            <h2 className="text-lg font-bold text-ink-900">Certificados</h2>
-            <p className="text-sm text-ink-500">Inspector: {user.nombre}</p>
-          </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-ink-100">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5">
-          {loading ? (
-            <Spinner label="Cargando certificados..." />
-          ) : (
-            <div className="space-y-4">
-              {certs.length === 0 && (
-                <div className="rounded-lg border border-dashed border-ink-200 bg-ink-50 p-6 text-center text-sm text-ink-500">
-                  Este usuario aún no tiene certificados registrados.
-                </div>
-              )}
-              {certs.map((c, i) => (
-                <div key={i} className="relative rounded-xl border border-ink-200 bg-ink-50/50 p-4">
-                  <button
-                    onClick={() => removeCert(i)}
-                    className="absolute right-3 top-3 text-red-500 hover:text-red-700 p-1 rounded-md hover:bg-red-50"
-                    title="Eliminar certificado"
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 mr-6">
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-ink-700">Técnica *</label>
-                      <select
-                        value={c.tecnica}
-                        onChange={(e) => updateCert(i, "tecnica", e.target.value)}
-                        className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
-                      >
-                        <option value="">— Selecciona —</option>
-                        <option value="MT">MT — Partículas Magnéticas</option>
-                        <option value="PMI">PMI — Caracterización de Materiales</option>
-                        <option value="570">API 570 — Inspección Visual de Tubería</option>
-                        <option value="510">API 510 — Inspección Visual de Recipientes a Presión</option>
-                        <option value="ESPESORES">Espesores — Medición por Ultrasonido</option>
-                        <option value="SCANC_LINEAS">SCAN C — Líneas</option>
-                        <option value="SCANC_RP">SCAN C — Recipientes a Presión</option>
-                      </select>
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="mb-1 block text-xs font-medium text-ink-700">Nombre del Certificado *</label>
-                      <input
-                        value={c.nombreCertificado}
-                        onChange={(e) => updateCert(i, "nombreCertificado", e.target.value)}
-                        placeholder="Ej: Nivel II PT (SNT-TC-1A)"
-                        className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-ink-700">Entidad Emisora</label>
-                      <input
-                        value={c.entidadEmisora}
-                        onChange={(e) => updateCert(i, "entidadEmisora", e.target.value)}
-                        placeholder="Ej: ASNT / Empresa"
-                        className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-ink-700">Fecha de Emisión</label>
-                      <input
-                        type="date"
-                        value={c.fechaEmision}
-                        onChange={(e) => updateCert(i, "fechaEmision", e.target.value)}
-                        className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-ink-700">Fecha de Vencimiento</label>
-                      <input
-                        type="date"
-                        value={c.fechaVencimiento}
-                        onChange={(e) => updateCert(i, "fechaVencimiento", e.target.value)}
-                        className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
-                      />
-                    </div>
-                    <div className="md:col-span-1">
-                      <label className="mb-1 block text-xs font-medium text-ink-700">Link / Documento</label>
-                      <input
-                        value={c.linkPdf}
-                        onChange={(e) => updateCert(i, "linkPdf", e.target.value)}
-                        placeholder="URL de Drive o archivo"
-                        className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              <button
-                onClick={addCert}
-                className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-ink-300 px-4 py-3 text-sm font-medium text-ink-600 hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700 w-full"
-              >
-                <Plus size={16} /> Añadir otro certificado
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="border-t border-ink-100 bg-ink-50 p-4 flex justify-end gap-3">
-          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-ink-600 hover:bg-ink-100">
-            Cancelar
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving || loading}
-            className="flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            {saving && <Loader2 size={14} className="animate-spin" />}
-            Guardar cambios
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -475,8 +176,12 @@ function EquiposFisicosTab() {
   const toast = useToast();
   const [equipos, setEquipos] = useState<RealEquipo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
   const [filtroCategoria, setFiltroCategoria] = useState(FILTRO_TODOS);
+  const [filtroEquipo, setFiltroEquipo] = useState("");
+  const [filtroSerie, setFiltroSerie] = useState("");
+  const [filtroSerialAdc, setFiltroSerialAdc] = useState("");
+  const [filtroVencimiento, setFiltroVencimiento] = useState<"todos" | EstadoFecha>("todos");
+  const [filtroObservaciones, setFiltroObservaciones] = useState("");
   const [filtroActivo, setFiltroActivo] = useState<"todos" | "activo" | "inactivo">("todos");
   const [edits, setEdits] = useState<Record<string, EquipoEdit>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -504,17 +209,34 @@ function EquiposFisicosTab() {
 
   const filtered = useMemo(() => {
     if (!equipos) return [];
-    const q = query.trim().toLowerCase();
+    const qEquipo = filtroEquipo.trim().toLowerCase();
+    const qSerie = filtroSerie.trim().toLowerCase();
+    const qSerialAdc = filtroSerialAdc.trim().toLowerCase();
+    const qObservaciones = filtroObservaciones.trim().toLowerCase();
     return equipos.filter((e) => {
       if (filtroCategoria !== FILTRO_TODOS && (e.categoria || "") !== filtroCategoria) return false;
       if (filtroActivo === "activo" && !e.activo) return false;
       if (filtroActivo === "inactivo" && e.activo) return false;
-      if (q && ![e.categoria, e.equipo, e.serie, e.serialAdc].some((v) => (v || "").toLowerCase().includes(q))) {
-        return false;
+      if (qEquipo && !(e.equipo || "").toLowerCase().includes(qEquipo)) return false;
+      if (qSerie && !(e.serie || "").toLowerCase().includes(qSerie)) return false;
+      if (qSerialAdc && !(e.serialAdc || "").toLowerCase().includes(qSerialAdc)) return false;
+      if (qObservaciones && !(e.observaciones || "").toLowerCase().includes(qObservaciones)) return false;
+      if (filtroVencimiento !== "todos") {
+        const { estado } = estadoFechaVencimiento(e.fechaVencimientoCalibracion || "");
+        if (estado !== filtroVencimiento) return false;
       }
       return true;
     });
-  }, [equipos, query, filtroCategoria, filtroActivo]);
+  }, [
+    equipos,
+    filtroCategoria,
+    filtroEquipo,
+    filtroSerie,
+    filtroSerialAdc,
+    filtroObservaciones,
+    filtroVencimiento,
+    filtroActivo,
+  ]);
 
   function valorCampo(e: RealEquipo, campo: keyof EquipoEdit): string {
     const edit = edits[e.idEquipo];
@@ -582,39 +304,7 @@ function EquiposFisicosTab() {
 
   return (
     <div>
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div className="flex flex-1 flex-wrap items-center gap-2">
-          <div className="relative min-w-[200px] max-w-sm flex-1">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar por categoría, serie o serial ADC..."
-              className="w-full rounded-lg border border-ink-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
-            />
-          </div>
-          <select
-            value={filtroCategoria}
-            onChange={(e) => setFiltroCategoria(e.target.value)}
-            className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600"
-          >
-            <option value={FILTRO_TODOS}>Todas las categorías</option>
-            {categorias.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filtroActivo}
-            onChange={(e) => setFiltroActivo(e.target.value as "todos" | "activo" | "inactivo")}
-            className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600"
-          >
-            <option value="todos">Activos e inactivos</option>
-            <option value="activo">Solo activos</option>
-            <option value="inactivo">Solo inactivos</option>
-          </select>
-        </div>
+      <div className="mb-4 flex justify-end">
         <button
           onClick={() => setShowNuevo(true)}
           className="flex items-center gap-2 self-start rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-700"
@@ -634,15 +324,89 @@ function EquiposFisicosTab() {
           <table className="w-full min-w-[1100px] text-sm">
             <thead className="bg-ink-50 text-left text-xs font-semibold uppercase text-ink-500">
               <tr>
-                <th className="px-3 py-3">Categoría</th>
-                <th className="px-3 py-3">Equipo</th>
-                <th className="px-3 py-3">Serie</th>
-                <th className="px-3 py-3">Serial ADC</th>
-                <th className="px-3 py-3">Última calibración</th>
-                <th className="px-3 py-3">Vencimiento</th>
-                <th className="px-3 py-3">Observaciones</th>
-                <th className="px-3 py-3">Estado</th>
-                <th className="px-3 py-3 text-right">Acciones</th>
+                <th className="px-3 pt-3">Categoría</th>
+                <th className="px-3 pt-3">Equipo</th>
+                <th className="px-3 pt-3">Serie</th>
+                <th className="px-3 pt-3">Serial ADC</th>
+                <th className="px-3 pt-3">Última calibración</th>
+                <th className="px-3 pt-3">Vencimiento</th>
+                <th className="px-3 pt-3">Observaciones</th>
+                <th className="px-3 pt-3">Estado</th>
+                <th className="px-3 pt-3 text-right">Acciones</th>
+              </tr>
+              <tr>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <select
+                    value={filtroCategoria}
+                    onChange={(e) => setFiltroCategoria(e.target.value)}
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  >
+                    <option value={FILTRO_TODOS}>Todas</option>
+                    {categorias.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <input
+                    value={filtroEquipo}
+                    onChange={(e) => setFiltroEquipo(e.target.value)}
+                    placeholder="Filtrar..."
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  />
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <input
+                    value={filtroSerie}
+                    onChange={(e) => setFiltroSerie(e.target.value)}
+                    placeholder="Filtrar..."
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  />
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <input
+                    value={filtroSerialAdc}
+                    onChange={(e) => setFiltroSerialAdc(e.target.value)}
+                    placeholder="Filtrar..."
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  />
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1"></th>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <select
+                    value={filtroVencimiento}
+                    onChange={(e) => setFiltroVencimiento(e.target.value as "todos" | EstadoFecha)}
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  >
+                    <option value="todos">Todos</option>
+                    <option value="vigente">Vigente</option>
+                    <option value="por_vencer">Por vencer</option>
+                    <option value="vencido">Vencido</option>
+                    <option value="sin_fecha">Sin fecha</option>
+                  </select>
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <input
+                    value={filtroObservaciones}
+                    onChange={(e) => setFiltroObservaciones(e.target.value)}
+                    placeholder="Filtrar..."
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  />
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <select
+                    value={filtroActivo}
+                    onChange={(e) => setFiltroActivo(e.target.value as "todos" | "activo" | "inactivo")}
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  >
+                    <option value="todos">Todos</option>
+                    <option value="activo">Activo</option>
+                    <option value="inactivo">Inactivo</option>
+                  </select>
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100">
@@ -927,8 +691,11 @@ function CertificadosTab() {
   const toast = useToast();
   const [certs, setCerts] = useState<PersonalCertificado[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  const [filtroNombre, setFiltroNombre] = useState("");
+  const [filtroCc, setFiltroCc] = useState("");
   const [filtroTecnica, setFiltroTecnica] = useState(FILTRO_TODOS);
+  const [filtroNivel, setFiltroNivel] = useState("");
+  const [filtroNumeroCertificado, setFiltroNumeroCertificado] = useState("");
   const [filtroEstado, setFiltroEstado] = useState(FILTRO_TODOS);
   const [edits, setEdits] = useState<Record<string, CertificadoEdit>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -967,14 +734,20 @@ function CertificadosTab() {
 
   const filtered = useMemo(() => {
     if (!certs) return [];
-    const q = query.trim().toLowerCase();
+    const qNombre = filtroNombre.trim().toLowerCase();
+    const qCc = filtroCc.trim().toLowerCase();
+    const qNivel = filtroNivel.trim().toLowerCase();
+    const qNumeroCertificado = filtroNumeroCertificado.trim().toLowerCase();
     return certs.filter((c) => {
       if (filtroTecnica !== FILTRO_TODOS && (c.tecnica || "") !== filtroTecnica) return false;
       if (filtroEstado !== FILTRO_TODOS && (c.estado || "") !== filtroEstado) return false;
-      if (q && !c.nombre.toLowerCase().includes(q) && !(c.cc || "").includes(q)) return false;
+      if (qNombre && !(c.nombre || "").toLowerCase().includes(qNombre)) return false;
+      if (qCc && !(c.cc || "").toLowerCase().includes(qCc)) return false;
+      if (qNivel && !(c.nivel || "").toLowerCase().includes(qNivel)) return false;
+      if (qNumeroCertificado && !(c.numeroCertificado || "").toLowerCase().includes(qNumeroCertificado)) return false;
       return true;
     });
-  }, [certs, query, filtroTecnica, filtroEstado]);
+  }, [certs, filtroNombre, filtroCc, filtroTecnica, filtroNivel, filtroNumeroCertificado, filtroEstado]);
 
   function valorCampo(c: PersonalCertificado, campo: keyof CertificadoEdit): string {
     const edit = edits[c.idCertificado];
@@ -1047,39 +820,7 @@ function CertificadosTab() {
         personal que todavía no tiene login en la plataforma. La técnica es texto libre. El
         nombre y la cédula no se editan desde esta tabla.
       </p>
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-        <div className="flex flex-1 flex-wrap items-center gap-2">
-          <div className="relative min-w-[200px] max-w-sm flex-1">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar por nombre o cédula..."
-              className="w-full rounded-lg border border-ink-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
-            />
-          </div>
-          <select
-            value={filtroTecnica}
-            onChange={(e) => setFiltroTecnica(e.target.value)}
-            className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600"
-          >
-            <option value={FILTRO_TODOS}>Todas las técnicas</option>
-            {tecnicas.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filtroEstado}
-            onChange={(e) => setFiltroEstado(e.target.value)}
-            className="rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-600"
-          >
-            <option value={FILTRO_TODOS}>Vigentes y vencidas</option>
-            <option value="VIGENTE">Solo vigentes</option>
-            <option value="VENCIDA">Solo vencidas</option>
-          </select>
-        </div>
+      <div className="mb-4 flex justify-end">
         <button
           onClick={() => setShowNuevo(true)}
           className="flex items-center gap-2 self-start rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-brand-700"
@@ -1099,15 +840,77 @@ function CertificadosTab() {
           <table className="w-full min-w-[1200px] text-sm">
             <thead className="bg-ink-50 text-left text-xs font-semibold uppercase text-ink-500">
               <tr>
-                <th className="px-3 py-3">Nombre</th>
-                <th className="px-3 py-3">CC</th>
-                <th className="px-3 py-3">Técnica</th>
-                <th className="px-3 py-3">Nivel</th>
-                <th className="px-3 py-3"># Certificado</th>
-                <th className="px-3 py-3">Fecha emisión</th>
-                <th className="px-3 py-3">Fecha vencimiento</th>
-                <th className="px-3 py-3">Estado</th>
-                <th className="px-3 py-3 text-right">Acciones</th>
+                <th className="px-3 pt-3">Nombre</th>
+                <th className="px-3 pt-3">CC</th>
+                <th className="px-3 pt-3">Técnica</th>
+                <th className="px-3 pt-3">Nivel</th>
+                <th className="px-3 pt-3"># Certificado</th>
+                <th className="px-3 pt-3">Fecha emisión</th>
+                <th className="px-3 pt-3">Fecha vencimiento</th>
+                <th className="px-3 pt-3">Estado</th>
+                <th className="px-3 pt-3 text-right">Acciones</th>
+              </tr>
+              <tr>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <input
+                    value={filtroNombre}
+                    onChange={(e) => setFiltroNombre(e.target.value)}
+                    placeholder="Filtrar..."
+                    className="w-full min-w-[130px] rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  />
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <input
+                    value={filtroCc}
+                    onChange={(e) => setFiltroCc(e.target.value)}
+                    placeholder="Filtrar..."
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  />
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <select
+                    value={filtroTecnica}
+                    onChange={(e) => setFiltroTecnica(e.target.value)}
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  >
+                    <option value={FILTRO_TODOS}>Todas</option>
+                    {tecnicas.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <input
+                    value={filtroNivel}
+                    onChange={(e) => setFiltroNivel(e.target.value)}
+                    placeholder="Filtrar..."
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  />
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <input
+                    value={filtroNumeroCertificado}
+                    onChange={(e) => setFiltroNumeroCertificado(e.target.value)}
+                    placeholder="Filtrar..."
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  />
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1"></th>
+                <th className="px-1.5 pb-2.5 pt-1"></th>
+                <th className="px-1.5 pb-2.5 pt-1 font-normal normal-case">
+                  <select
+                    value={filtroEstado}
+                    onChange={(e) => setFiltroEstado(e.target.value)}
+                    className="w-full rounded border border-ink-200 bg-white px-2 py-1 text-xs outline-none focus:border-brand-600"
+                  >
+                    <option value={FILTRO_TODOS}>Todos</option>
+                    <option value="VIGENTE">Vigente</option>
+                    <option value="VENCIDA">Vencida</option>
+                  </select>
+                </th>
+                <th className="px-1.5 pb-2.5 pt-1"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100">
