@@ -9,19 +9,29 @@ import { Spinner, ErrorState } from "../components/ui/States";
 import { Badge } from "../components/ui/Badge";
 import { ROLE_LABEL } from "../components/layout/navConfig";
 
-// Paleta ADEMINCOL para las técnicas
+// Paleta categórica validada (8 pasos, orden fijo — ver skill de dataviz:
+// "un 9no color nunca es un hue generado, se pliega en Otra/agrupado"). Con
+// 9 técnicas reales hoy (MT/PMI/570/510/ESPESORES/SCANC_LINEAS/SCANC_RP/
+// PIERNAS_MUERTAS/ACFM) se pliegan SCANC_LINEAS y SCANC_RP en una sola
+// serie "SCANC" para estos gráficos (ver normalizarTecnica) — así entran
+// justo en los 8 slots sin generar un color extra ni caer a gris genérico.
 const TECNICA_COLORS: Record<string, string> = {
-  MT: "#dc2626",       // brand red
-  PMI: "#0284c7",      // sky-600
-  "570": "#059669",    // emerald-600
-  "510": "#d97706",    // amber-600
-  ESPESORES: "#7c3aed", // violet-600
-  SCANC_LINEAS: "#0891b2", // cyan-600
-  SCANC_RP: "#be185d",     // pink-700
+  MT: "#2a78d6",           // slot 1 — blue
+  PMI: "#1baf7a",          // slot 2 — aqua
+  "570": "#eda100",        // slot 3 — yellow
+  "510": "#008300",        // slot 4 — green
+  ESPESORES: "#4a3aa7",    // slot 5 — violet
+  SCANC: "#e34948",        // slot 6 — red
+  PIERNAS_MUERTAS: "#e87ba4", // slot 7 — magenta
+  ACFM: "#eb6834",         // slot 8 — orange
 };
 
+function normalizarTecnica(tecnica: string): string {
+  return tecnica === "SCANC_LINEAS" || tecnica === "SCANC_RP" ? "SCANC" : tecnica;
+}
+
 function colorParaTecnica(tecnica: string): string {
-  return TECNICA_COLORS[tecnica] || "#6b7280";
+  return TECNICA_COLORS[normalizarTecnica(tecnica)] || "#89877e";
 }
 
 // Dashboard con datos REALES (BD Sheets + Sheets de MT/PMI/570), diferenciado
@@ -67,16 +77,22 @@ export function DashboardPage() {
 function buildGroupedBarData(
   dataMap: Record<string, Record<string, number>>
 ): { chartData: Array<Record<string, string | number>>; tecnicas: string[] } {
+  // Orden fijo de la paleta categórica (no alfabético) — el orden de los
+  // slots ES el mecanismo de seguridad CVD del skill de dataviz, alterarlo
+  // (ej. con .sort()) puede juntar dos hues poco distinguibles.
+  const ordenFijo = Object.keys(TECNICA_COLORS);
   const tecnicasSet = new Set<string>();
   for (const sub of Object.values(dataMap)) {
-    for (const t of Object.keys(sub)) tecnicasSet.add(t);
+    for (const t of Object.keys(sub)) tecnicasSet.add(normalizarTecnica(t));
   }
-  const tecnicas = Array.from(tecnicasSet).sort();
+  const tecnicas = ordenFijo.filter((t) => tecnicasSet.has(t));
 
   const chartData = Object.entries(dataMap).map(([name, tecMap]) => {
     const entry: Record<string, string | number> = { name };
-    for (const t of tecnicas) {
-      entry[t] = tecMap[t] || 0;
+    for (const t of tecnicas) entry[t] = 0;
+    for (const [tecRaw, valor] of Object.entries(tecMap)) {
+      const t = normalizarTecnica(tecRaw);
+      entry[t] = (Number(entry[t]) || 0) + valor;
     }
     return entry;
   });
@@ -127,7 +143,16 @@ function AdminDashboard({ data }: { data: RealDashboardData }) {
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                 {inspectorChart.tecnicas.map((t) => (
-                  <Bar key={t} dataKey={t} fill={colorParaTecnica(t)} radius={[0, 4, 4, 0]} barSize={18} />
+                  <Bar
+                    key={t}
+                    dataKey={t}
+                    name={t}
+                    stackId="tecnica"
+                    fill={colorParaTecnica(t)}
+                    stroke="#fcfcfb"
+                    strokeWidth={2}
+                    barSize={18}
+                  />
                 ))}
               </BarChart>
             </ResponsiveContainer>
@@ -207,7 +232,16 @@ function AdminDashboard({ data }: { data: RealDashboardData }) {
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                 {supervisorChart.tecnicas.map((t) => (
-                  <Bar key={t} dataKey={t} fill={colorParaTecnica(t)} radius={[0, 4, 4, 0]} barSize={18} />
+                  <Bar
+                    key={t}
+                    dataKey={t}
+                    name={t}
+                    stackId="tecnica"
+                    fill={colorParaTecnica(t)}
+                    stroke="#fcfcfb"
+                    strokeWidth={2}
+                    barSize={18}
+                  />
                 ))}
               </BarChart>
             </ResponsiveContainer>
