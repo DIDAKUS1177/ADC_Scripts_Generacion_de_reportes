@@ -8,6 +8,7 @@ por el backend real de las Fases 2-4 (docs/).
 import io
 import json
 import logging
+import re
 import threading
 import uuid
 import zipfile
@@ -803,6 +804,17 @@ def get_570_inspection_detail(id_api570: str):
     }
 
 
+def _slug_archivo(valor) -> str:
+    """Convierte un valor de celda en un fragmento seguro para nombre de
+    archivo (sin '/', ':', espacios, etc.). Cadena vacía si el valor viene
+    vacío/None — el llamador decide si omitirlo del nombre final."""
+    texto = str(valor or "").strip()
+    if not texto:
+        return ""
+    texto = re.sub(r'[\\/:*?"<>|]', "", texto)
+    return re.sub(r"\s+", "_", texto)
+
+
 def _generar_bytes_570(id_api570: str, overrides: dict, progreso=None) -> tuple[bytes, str, list[str]]:
     fila_general, secciones_data, secciones_fotos = _cargar_datos_570(id_api570)
 
@@ -824,7 +836,17 @@ def _generar_bytes_570(id_api570: str, overrides: dict, progreso=None) -> tuple[
         warnings.append(f"El inspector '{inspector_nombre}' no tiene un certificado de API 570 registrado.")
 
     contenido = generar_reporte_570(fila_general, secciones_data, secciones_fotos, progreso=progreso)
-    return contenido, f"Reporte_570_{id_api570}.xlsx", warnings
+    # Nombre de archivo pedido por el usuario 2026-07-16: sistema_subsistema_
+    # id_api570 (en vez de "Reporte_570_<id>") para identificar el reporte
+    # de un vistazo entre muchos descargados. Si falta sistema o subsistema
+    # en el Sheet, se omite ese fragmento en vez de dejar "None" o "__".
+    partes = [
+        _slug_archivo(fila_general.get("sistema")),
+        _slug_archivo(fila_general.get("subsistema")),
+        id_api570,
+    ]
+    nombre_archivo = "_".join(p for p in partes if p)
+    return contenido, f"{nombre_archivo}.xlsx", warnings
 
 
 def _job_generar_570(job_id: str, id_api570: str, overrides: dict):
