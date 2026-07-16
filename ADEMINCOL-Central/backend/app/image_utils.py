@@ -14,6 +14,7 @@ from PIL import Image as PILImage, ImageChops
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
 from openpyxl.drawing.xdr import XDRPositiveSize2D
+from openpyxl.styles import Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
 from openpyxl.utils.units import pixels_to_EMU
@@ -196,3 +197,22 @@ def insertar_imagen_centrada(ws, image_bytes: bytes, celda_ancla: str, recortar_
     img.anchor = OneCellAnchor(_from=marker, ext=size)
 
     ws.add_image(img)
+
+
+def marcar_celda_sin_imagen(ws, celda_ancla: str):
+    """Marca con una diagonal (mismo estilo "sin dato" del diálogo de bordes
+    de Sheets/Excel, línea de esquina inferior-izquierda a superior-derecha)
+    la celda donde debía ir una foto de inspección pero no hay imagen
+    disponible — pedido del usuario 2026-07-16. Se aplica solo a la celda
+    ancla: si es parte de un rango combinado, Excel dibuja la diagonal a lo
+    largo de TODO el rectángulo combinado (toma el borde del cell top-left),
+    igual que ya hace con la imagen en `insertar_imagen_centrada`.
+
+    Preserva los bordes existentes (arriba/abajo/izq/der) de la celda —
+    solo agrega la diagonal, no reemplaza el resto del estilo."""
+    actual = ws[celda_ancla].border
+    ws[celda_ancla].border = Border(
+        left=actual.left, right=actual.right, top=actual.top, bottom=actual.bottom,
+        diagonal=Side(style="thin", color="FF000000"),
+        diagonalUp=True, diagonalDown=False,
+    )

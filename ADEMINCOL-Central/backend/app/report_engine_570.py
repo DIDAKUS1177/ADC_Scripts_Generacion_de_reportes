@@ -25,7 +25,12 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
-from .image_utils import desactivar_fit_to_page, descargar_imagen, insertar_imagen_centrada
+from .image_utils import (
+    desactivar_fit_to_page,
+    descargar_imagen,
+    insertar_imagen_centrada,
+    marcar_celda_sin_imagen,
+)
 from .report_utils import valor_tipado
 
 logger = logging.getLogger("report_engine_570")
@@ -302,13 +307,23 @@ def generar_reporte_570(
                 ws.row_dimensions[f_desc].height = ws.row_dimensions[base_desc_row].height
             filas_acumuladas += filas_extra_fotos
 
-        for i, foto in enumerate(fotos):
+        # Celdas de foto SIN imagen (sea porque la sección tiene menos fotos
+        # que espacios en la última fila de 4, o porque la descarga falló)
+        # quedan marcadas con una diagonal — pedido del usuario 2026-07-16,
+        # mismo estilo "sin dato" del diálogo de bordes de Sheets/Excel.
+        total_slots_fotos = chunks_necesarios * 4
+        for i in range(total_slots_fotos):
             chunk_idx = i // 4
             pos_in_chunk = i % 4
             f_foto = base_photo_row + chunk_idx * 2
             f_desc = f_foto + 1
             col = config["photo_cols"][pos_in_chunk]
 
+            if i >= len(fotos):
+                marcar_celda_sin_imagen(ws, f"{col}{f_foto}")
+                continue
+
+            foto = fotos[i]
             desc = foto.get("descripcion") or ""
             if desc:
                 ws[f"{col}{f_desc}"] = desc
@@ -316,6 +331,8 @@ def generar_reporte_570(
             img_bytes = descargar_imagen(foto.get("url") or "")
             if img_bytes:
                 insertar_imagen_centrada(ws, img_bytes, f"{col}{f_foto}")
+            else:
+                marcar_celda_sin_imagen(ws, f"{col}{f_foto}")
 
             fotos_procesadas += 1
             pct_fotos = 10 + round((fotos_procesadas / total_fotos) * 80)

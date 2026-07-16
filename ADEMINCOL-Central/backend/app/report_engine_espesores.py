@@ -24,7 +24,12 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
-from .image_utils import desactivar_fit_to_page, descargar_imagen, insertar_imagen_centrada
+from .image_utils import (
+    desactivar_fit_to_page,
+    descargar_imagen,
+    insertar_imagen_centrada,
+    marcar_celda_sin_imagen,
+)
 from .report_utils import valor_tipado
 
 logger = logging.getLogger("report_engine_espesores")
@@ -320,13 +325,23 @@ def generar_reporte_espesores(
         filas_extra += filas_extra_fotos
 
     total_fotos = len(fotos) or 1
-    for i, foto in enumerate(fotos):
+    # Celdas de foto SIN imagen (menos fotos que espacios en el último bloque
+    # de 3, o descarga fallida) quedan marcadas con una diagonal — pedido
+    # del usuario 2026-07-16, mismo estilo "sin dato" del diálogo de bordes
+    # de Sheets/Excel.
+    total_slots_fotos = chunks_necesarios * 3
+    for i in range(total_slots_fotos):
         chunk_idx = i // 3
         pos_in_chunk = i % 3
         f_foto = fila_base_foto + chunk_idx * 2
         f_desc = f_foto + 1
         col = COLUMNAS_FOTOS[pos_in_chunk]
 
+        if i >= len(fotos):
+            marcar_celda_sin_imagen(ws, f"{col}{f_foto}")
+            continue
+
+        foto = fotos[i]
         desc = foto.get("descripcion") or ""
         if desc:
             ws[f"{col}{f_desc}"] = desc
@@ -336,6 +351,8 @@ def generar_reporte_espesores(
         img_bytes = descargar_imagen(foto.get("url") or "")
         if img_bytes:
             insertar_imagen_centrada(ws, img_bytes, f"{col}{f_foto}")
+        else:
+            marcar_celda_sin_imagen(ws, f"{col}{f_foto}")
 
     # ---- Firmas: fila 39-44, DEBAJO de la tabla de lecturas/fotos — su
     # posición real quedó desplazada por `filas_extra` (lecturas + fotos
