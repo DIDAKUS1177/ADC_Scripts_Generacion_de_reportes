@@ -132,6 +132,27 @@ def _col_fila(celda: str) -> tuple[str, int]:
     return m.group(1), int(m.group(2))
 
 
+def _corregir_referencias_grafico(ws):
+    """El gráfico de barras nativo de la plantilla (comparación de espesores
+    medidos vs. nominal) referencia una hoja 'FORMATOS_SCAN_C' que NO existe
+    en este workbook — residuo de haber copiado la plantilla desde el
+    formato SCAN C, que sí tiene una hoja con ese nombre. Como Excel no
+    puede resolver esa hoja, el gráfico sale vacío/roto (ejes en blanco o
+    "None"), aunque los datos SÍ están, en la hoja real 'FORMATO'
+    (X27:AB27/X28:AB28, fórmulas que traen los valores de la tabla de
+    lecturas) — reportado por el usuario 2026-07-16 con una captura del
+    gráfico roto. Se corrige el nombre de hoja en cada referencia de serie."""
+    for chart in ws._charts:
+        for serie in chart.series:
+            for ref_holder in (serie.val, serie.cat):
+                if ref_holder is None:
+                    continue
+                for ref_attr in ("numRef", "strRef"):
+                    ref = getattr(ref_holder, ref_attr, None)
+                    if ref is not None and ref.f and "FORMATOS_SCAN_C" in ref.f:
+                        ref.f = ref.f.replace("FORMATOS_SCAN_C", ws.title)
+
+
 def _ajustar_formula_por_fila(formula: str, fila_origen: int, fila_destino: int) -> str:
     """Traducción literal de ajustarFormulaPorFila() en
     Reporte_Medicion_Espesores.gs: reemplaza toda referencia de celda a
@@ -232,6 +253,7 @@ def generar_reporte_espesores(
     wb = load_workbook(TEMPLATE_PATH)
     ws = wb[HOJA_FORMATO]
     desactivar_fit_to_page(ws)
+    _corregir_referencias_grafico(ws)
 
     _reportar(8, "Escribiendo datos generales")
     for campo, celda in CELDAS_GENERALES.items():
