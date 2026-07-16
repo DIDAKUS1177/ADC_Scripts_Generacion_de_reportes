@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
 from .image_utils import desactivar_fit_to_page, descargar_imagen, insertar_imagen_centrada
@@ -145,6 +146,19 @@ def _col_fila(celda: str) -> tuple[str, int]:
     un entero)."""
     m = re.match(r"([A-Z]+)(\d+)", celda)
     return m.group(1), int(m.group(2))
+
+
+def _escribir_texto_negro(ws, celda: str, valor):
+    """Escribe un valor y fuerza fuente negra — las celdas de los bloques
+    revisor/aprobador (Y166-169/AN166-169) heredan en la plantilla el color
+    blanco del encabezado rojo de arriba (theme=0), lo que las deja
+    invisibles sobre el fondo blanco/gris de esas filas (bug reportado por
+    el usuario 2026-07-16, texto "en blanco" aunque el dato sí estaba)."""
+    ws[celda] = valor
+    f = ws[celda].font
+    ws[celda].font = Font(
+        name=f.name, size=f.size, bold=f.bold, italic=f.italic, color="FF000000"
+    )
 
 
 def _insertar_filas_y_ajustar_alturas(ws, pos: int, n: int):
@@ -333,14 +347,14 @@ def generar_reporte_570(
         if not nombre:
             continue
         col_nom, fila_nom = _col_fila(celdas_texto["nombre"])
-        ws[f"{col_nom}{fila_nom + filas_acumuladas}"] = valor_tipado(nombre)
+        _escribir_texto_negro(ws, f"{col_nom}{fila_nom + filas_acumuladas}", valor_tipado(nombre))
         for campo in ("cargo", "certificado"):
             valor = fila_general.get(f"{prefijo}_{campo}")
             if valor:
                 col_c, fila_c = _col_fila(celdas_texto[campo])
-                ws[f"{col_c}{fila_c + filas_acumuladas}"] = valor_tipado(valor)
+                _escribir_texto_negro(ws, f"{col_c}{fila_c + filas_acumuladas}", valor_tipado(valor))
         col_f, fila_f = _col_fila(celdas_texto["fecha"])
-        ws[f"{col_f}{fila_f + filas_acumuladas}"] = datetime.now().strftime("%Y-%m-%d")
+        _escribir_texto_negro(ws, f"{col_f}{fila_f + filas_acumuladas}", datetime.now().strftime("%Y-%m-%d"))
         firma_bytes_bloque = descargar_imagen(fila_general.get(f"{prefijo}_firma_link", ""))
         if firma_bytes_bloque:
             col_fi, fila_fi = _col_fila(celda_firma)
