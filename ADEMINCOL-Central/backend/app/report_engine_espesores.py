@@ -331,7 +331,7 @@ def generar_reporte_espesores(
     col_firma, fila_firma = CELDA_FIRMA[0], int(CELDA_FIRMA[1:]) + filas_extra
     firma_bytes = descargar_imagen(fila_general.get("link_firma", ""))
     if firma_bytes:
-        insertar_imagen_centrada(ws, firma_bytes, f"{col_firma}{fila_firma}")
+        insertar_imagen_centrada(ws, firma_bytes, f"{col_firma}{fila_firma}", recortar_contenido=True)
 
     supervisor_nombre = fila_general.get("supervisor_nombre")
     if supervisor_nombre:
@@ -349,7 +349,9 @@ def generar_reporte_espesores(
         firma_supervisor_bytes = descargar_imagen(fila_general.get("supervisor_firma_link", ""))
         if firma_supervisor_bytes:
             col_fs, fila_fs = CELDA_FIRMA_SUPERVISOR[0], int(CELDA_FIRMA_SUPERVISOR[1:]) + filas_extra
-            insertar_imagen_centrada(ws, firma_supervisor_bytes, f"{col_fs}{fila_fs}")
+            insertar_imagen_centrada(
+                ws, firma_supervisor_bytes, f"{col_fs}{fila_fs}", recortar_contenido=True
+            )
 
     aprobador_nombre = fila_general.get("aprobador_nombre")
     if aprobador_nombre:
@@ -367,7 +369,9 @@ def generar_reporte_espesores(
         firma_aprobador_bytes = descargar_imagen(fila_general.get("aprobador_firma_link", ""))
         if firma_aprobador_bytes:
             col_fs, fila_fs = _col_fila(CELDA_FIRMA_APROBADOR)
-            insertar_imagen_centrada(ws, firma_aprobador_bytes, f"{col_fs}{fila_fs + filas_extra}")
+            insertar_imagen_centrada(
+                ws, firma_aprobador_bytes, f"{col_fs}{fila_fs + filas_extra}", recortar_contenido=True
+            )
 
     _reportar(97, "Guardando archivo")
     buffer = io.BytesIO()

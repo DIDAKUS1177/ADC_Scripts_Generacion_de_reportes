@@ -330,7 +330,7 @@ def generar_reporte_570(
     fila_firma = int(CELDA_FIRMA[1:]) + filas_acumuladas
     firma_bytes = descargar_imagen(fila_general.get("link_firma", ""))
     if firma_bytes:
-        insertar_imagen_centrada(ws, firma_bytes, f"J{fila_firma}")
+        insertar_imagen_centrada(ws, firma_bytes, f"J{fila_firma}", recortar_contenido=True)
     for campo, celda in CELDAS_FIRMA_TEXTO.items():
         valor = fila_general.get(campo)
         if valor:
@@ -358,7 +358,9 @@ def generar_reporte_570(
         firma_bytes_bloque = descargar_imagen(fila_general.get(f"{prefijo}_firma_link", ""))
         if firma_bytes_bloque:
             col_fi, fila_fi = _col_fila(celda_firma)
-            insertar_imagen_centrada(ws, firma_bytes_bloque, f"{col_fi}{fila_fi + filas_acumuladas}")
+            insertar_imagen_centrada(
+                ws, firma_bytes_bloque, f"{col_fi}{fila_fi + filas_acumuladas}", recortar_contenido=True
+            )
 
     _reportar(97, "Guardando archivo")
     buffer = io.BytesIO()

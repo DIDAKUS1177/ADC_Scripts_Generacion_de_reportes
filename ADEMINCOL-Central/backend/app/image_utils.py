@@ -10,6 +10,7 @@ import logging
 import re
 
 import httpx
+from PIL import Image as PILImage, ImageChops
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
 from openpyxl.drawing.xdr import XDRPositiveSize2D
@@ -76,6 +77,37 @@ def descargar_imagen(url: str) -> bytes | None:
     return None
 
 
+def _recortar_a_contenido(image_bytes: bytes) -> bytes:
+    """Recorta los márgenes en blanco/transparentes alrededor del trazo real
+    de una firma antes de insertarla — sin esto, `insertar_imagen_centrada`
+    centra el RECTÁNGULO del archivo de imagen, pero si la firma trae
+    márgenes asimétricos (foto de un papel firmado, captura de pantalla con
+    espacio de sobra a un lado) el trazo visible queda descentrado aunque el
+    archivo en sí esté "centrado" (reportado por el usuario 2026-07-16, con
+    capturas donde las firmas de Revisor/Aprobador se veían pegadas a una
+    esquina)."""
+    try:
+        img = PILImage.open(io.BytesIO(image_bytes))
+        img.load()
+        if img.mode == "RGBA" or (img.mode == "P" and "transparency" in img.info):
+            alpha = img.convert("RGBA").split()[-1]
+            bbox = alpha.getbbox()
+        else:
+            rgb = img.convert("RGB")
+            fondo = PILImage.new("RGB", rgb.size, (255, 255, 255))
+            diff = ImageChops.difference(rgb, fondo)
+            bbox = diff.getbbox()
+        if not bbox:
+            return image_bytes
+        recortada = img.crop(bbox)
+        buf = io.BytesIO()
+        recortada.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        logger.warning("No se pudo recortar la imagen al contenido, se usa tal cual")
+        return image_bytes
+
+
 def _ancho_columna(ws, col_letra: str) -> float:
     """Ancho de columna (unidades de caracter) SIN mutar la hoja.
 
@@ -99,9 +131,14 @@ def _alto_fila(ws, fila_num: int) -> float:
     return dim.height if dim and dim.height else 15
 
 
-def insertar_imagen_centrada(ws, image_bytes: bytes, celda_ancla: str):
+def insertar_imagen_centrada(ws, image_bytes: bytes, celda_ancla: str, recortar_contenido: bool = False):
     """Inserta una imagen flotante centrada en el área de la celda (o su rango
     combinado), replicando el fix ya aplicado en los scripts GAS.
+
+    `recortar_contenido=True` (solo para firmas, ver `_recortar_a_contenido`)
+    recorta los márgenes en blanco/transparentes ANTES de centrar — para
+    fotos de inspección normales debe quedar en False, porque una foto puede
+    tener legítimamente fondo claro (cielo, pared) que NO hay que recortar.
 
     NOTA: el cálculo de ancho de columna usaba `chr(64 + c)` que solo
     funciona hasta la columna Z — se reemplazó por `get_column_letter()`
@@ -130,6 +167,8 @@ def insertar_imagen_centrada(ws, image_bytes: bytes, celda_ancla: str):
     ancho_area = sum(_ancho_columna(ws, get_column_letter(c)) * 7 + 5 for c in range(min_col, max_col + 1))
     alto_area = sum(_alto_fila(ws, r) for r in range(min_row, max_row + 1)) * 96 / 72
 
+    if recortar_contenido:
+        image_bytes = _recortar_a_contenido(image_bytes)
     try:
         img = XLImage(io.BytesIO(image_bytes))
     except Exception:
