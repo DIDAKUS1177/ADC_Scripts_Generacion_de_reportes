@@ -1172,6 +1172,8 @@ def _generar_bytes_espesores(id_general: str, overrides: dict, progreso=None) ->
         fila_general["supervisor_nombre"] = overrides["supervisor_nombre_manual"].strip()
         if str(overrides.get("supervisor_cargo_manual", "")).strip():
             fila_general["supervisor_cargo"] = overrides["supervisor_cargo_manual"].strip()
+        if str(overrides.get("supervisor_certificado_manual", "")).strip():
+            fila_general["supervisor_certificado"] = overrides["supervisor_certificado_manual"].strip()
         if str(overrides.get("supervisor_firma_manual", "")).strip():
             fila_general["supervisor_firma_link"] = overrides["supervisor_firma_manual"].strip()
     else:

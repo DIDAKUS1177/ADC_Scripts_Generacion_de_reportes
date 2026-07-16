@@ -20,6 +20,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useBatchGeneration } from "./useBatchGeneration";
 import { BatchGenerationStatus } from "./BatchGenerationStatus";
 import { FotosPorSeccion } from "./FotosPorSeccion";
+import { FirmaSelector, type FirmaSelectorHandle } from "./FirmaSelector";
 
 // Panel de datos REALES de API 570 (Inspección Visual de Tubería). A
 // diferencia de MT/PMI, el reporte tiene 15 secciones independientes con
@@ -45,18 +46,18 @@ export function Real570InspectionsPanel() {
   // Bloques "Revisado por" (Y165-169) y "Aprobado por" (AN165-169) — pedido
   // explícito del usuario 2026-07-14: libertad de elegir, entre los usuarios
   // registrados en la plataforma, quién revisa y quién aprueba cada
-  // reporte. Vacío = no se llena ese bloque en el .xlsx.
+  // reporte. Vacío = no se llena ese bloque en el .xlsx. 2026-07-16: además
+  // del selector, libertad de colocar nombre/cargo/certificado/firma
+  // manualmente (ver FirmaSelector) — ambas vías conviven, no una en vez
+  // de la otra.
   const [usuarios, setUsuarios] = useState<RealUser[]>([]);
-  const [revisorUsuario, setRevisorUsuario] = useState("");
-  const [aprobadorUsuario, setAprobadorUsuario] = useState("");
+  const revisorRef = useRef<FirmaSelectorHandle>(null);
+  const aprobadorRef = useRef<FirmaSelectorHandle>(null);
   useEffect(() => {
     fetchRealUsers()
       .then(setUsuarios)
       .catch(() => setUsuarios([]));
   }, []);
-  useEffect(() => {
-    if (user?.usuario && !revisorUsuario) setRevisorUsuario(user.usuario);
-  }, [user, revisorUsuario]);
 
   const filtered = useMemo(() => {
     if (!items) return null;
@@ -99,8 +100,8 @@ export function Real570InspectionsPanel() {
     try {
       const jobId = await startReportJob("570", selected, {
         ...edits,
-        revisor_usuario: revisorUsuario,
-        aprobador_usuario: aprobadorUsuario,
+        ...(revisorRef.current?.getOverrides() ?? {}),
+        ...(aprobadorRef.current?.getOverrides() ?? {}),
       });
       pollRef.current = window.setInterval(async () => {
         try {
@@ -257,42 +258,25 @@ export function Real570InspectionsPanel() {
                 </p>
               </div>
               {!job && (
-                <div className="flex shrink-0 items-end gap-2">
-                  <label className="block">
-                    <span className="mb-1 block text-[11px] font-medium text-ink-500">Revisor</span>
-                    <select
-                      value={revisorUsuario}
-                      onChange={(e) => setRevisorUsuario(e.target.value)}
-                      className="rounded-lg border border-ink-200 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
-                    >
-                      <option value="">— Ninguno —</option>
-                      {usuarios.map((u) => (
-                        <option key={u.usuario} value={u.usuario}>
-                          {u.nombre}
-                          {u.usuario === user?.usuario ? " (tú)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 block text-[11px] font-medium text-ink-500">Aprobador</span>
-                    <select
-                      value={aprobadorUsuario}
-                      onChange={(e) => setAprobadorUsuario(e.target.value)}
-                      className="rounded-lg border border-ink-200 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
-                    >
-                      <option value="">— Ninguno —</option>
-                      {usuarios.map((u) => (
-                        <option key={u.usuario} value={u.usuario}>
-                          {u.nombre}
-                          {u.usuario === user?.usuario ? " (tú)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <div className="flex shrink-0 items-start gap-2">
+                  <FirmaSelector
+                    ref={revisorRef}
+                    label="Revisor"
+                    prefijo="revisor"
+                    usuarios={usuarios}
+                    usuarioActual={user?.usuario}
+                    defaultUsuario={user?.usuario}
+                  />
+                  <FirmaSelector
+                    ref={aprobadorRef}
+                    label="Aprobador"
+                    prefijo="aprobador"
+                    usuarios={usuarios}
+                    usuarioActual={user?.usuario}
+                  />
                   <button
                     onClick={handleGenerar}
-                    className="flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+                    className="mt-[19px] flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
                   >
                     <Download size={14} />
                     Generar reporte (.xlsx)
@@ -403,14 +387,14 @@ function ConfigurarLoteModal570({
   onClose: () => void;
   onConfirmar: (overrides: Record<string, string>) => void;
 }) {
-  const [revisor, setRevisor] = useState(nombreUsuario);
-  const [aprobador, setAprobador] = useState("");
+  const revisorRef = useRef<FirmaSelectorHandle>(null);
+  const aprobadorRef = useRef<FirmaSelectorHandle>(null);
 
   function handleConfirmar() {
-    const overrides: Record<string, string> = {};
-    if (revisor) overrides.revisor_usuario = revisor;
-    if (aprobador) overrides.aprobador_usuario = aprobador;
-    onConfirmar(overrides);
+    onConfirmar({
+      ...(revisorRef.current?.getOverrides() ?? {}),
+      ...(aprobadorRef.current?.getOverrides() ?? {}),
+    });
   }
 
   return (
@@ -426,41 +410,24 @@ function ConfigurarLoteModal570({
           </button>
         </div>
 
-        <div className="space-y-3 p-5">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-ink-700">Revisor</label>
-            <select
-              value={revisor}
-              onChange={(e) => setRevisor(e.target.value)}
-              className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
-            >
-              <option value="">— Ninguno —</option>
-              {usuarios.map((u) => (
-                <option key={u.usuario} value={u.usuario}>
-                  {u.nombre}
-                  {u.usuario === nombreUsuario ? " (tú)" : ""}
-                  {!u.tieneFirma ? " — sin firma cargada" : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-ink-700">Aprobador</label>
-            <select
-              value={aprobador}
-              onChange={(e) => setAprobador(e.target.value)}
-              className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
-            >
-              <option value="">— Ninguno —</option>
-              {usuarios.map((u) => (
-                <option key={u.usuario} value={u.usuario}>
-                  {u.nombre}
-                  {u.usuario === nombreUsuario ? " (tú)" : ""}
-                  {!u.tieneFirma ? " — sin firma cargada" : ""}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className="space-y-4 p-5">
+          <FirmaSelector
+            ref={revisorRef}
+            label="Revisor"
+            prefijo="revisor"
+            usuarios={usuarios}
+            usuarioActual={nombreUsuario}
+            defaultUsuario={nombreUsuario}
+            className="w-full"
+          />
+          <FirmaSelector
+            ref={aprobadorRef}
+            label="Aprobador"
+            prefijo="aprobador"
+            usuarios={usuarios}
+            usuarioActual={nombreUsuario}
+            className="w-full"
+          />
         </div>
 
         <div className="flex justify-end gap-2 border-t border-ink-100 p-4">

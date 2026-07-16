@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, ImageIcon, Layers, Loader2, PencilLine, Signature, X } from "lucide-react";
+import { Download, Eye, ImageIcon, Layers, PencilLine, X } from "lucide-react";
 import {
   downloadJobResult,
   fetchRealEspesoresInspectionDetail,
@@ -20,6 +20,7 @@ import { useToast } from "../ui/Toast";
 import { useAuth } from "../../context/AuthContext";
 import { useBatchGeneration } from "./useBatchGeneration";
 import { BatchGenerationStatus } from "./BatchGenerationStatus";
+import { FirmaSelector, type FirmaSelectorHandle } from "./FirmaSelector";
 
 // Panel de datos REALES de Medición de Espesores (UT). A diferencia de
 // 570/510 no hay secciones — UNA sola tabla de lecturas + fotos, así que el
@@ -41,21 +42,20 @@ export function RealEspesoresInspectionsPanel() {
   const [showLoteModal, setShowLoteModal] = useState(false);
   const batchGen = useBatchGeneration("espesores");
 
-  // Bloques "Revisado por" (P40-44) y "Aprobado por" (AC40-44) — pedido
+  // Bloques "Revisado por" (P40-44, prefijo backend "supervisor" — nombre
+  // legado) y "Aprobado por" (AC40-44, prefijo "aprobador") — pedido
   // explícito del usuario 2026-07-14: libertad de elegir, entre los usuarios
   // registrados en la plataforma, quién revisa y quién aprueba cada
-  // reporte (antes "Revisado por" quedaba fijo en el usuario autenticado).
+  // reporte. 2026-07-16: además del selector, libertad de colocar
+  // nombre/cargo/certificado/firma manualmente (ver FirmaSelector).
   const [usuarios, setUsuarios] = useState<RealUser[]>([]);
-  const [revisorUsuario, setRevisorUsuario] = useState("");
-  const [aprobadorUsuario, setAprobadorUsuario] = useState("");
+  const revisorRef = useRef<FirmaSelectorHandle>(null);
+  const aprobadorRef = useRef<FirmaSelectorHandle>(null);
   useEffect(() => {
     fetchRealUsers()
       .then(setUsuarios)
       .catch(() => setUsuarios([]));
   }, []);
-  useEffect(() => {
-    if (user?.usuario && !revisorUsuario) setRevisorUsuario(user.usuario);
-  }, [user, revisorUsuario]);
 
   const filtered = useMemo(() => {
     if (!items) return null;
@@ -98,8 +98,8 @@ export function RealEspesoresInspectionsPanel() {
     try {
       const jobId = await startReportJob("espesores", selected, {
         ...edits,
-        supervisor_usuario: revisorUsuario || user?.usuario || "",
-        aprobador_usuario: aprobadorUsuario,
+        ...(revisorRef.current?.getOverrides() ?? {}),
+        ...(aprobadorRef.current?.getOverrides() ?? {}),
       });
       pollRef.current = window.setInterval(async () => {
         try {
@@ -254,42 +254,25 @@ export function RealEspesoresInspectionsPanel() {
                 </p>
               </div>
               {!job && (
-                <div className="flex shrink-0 items-end gap-2">
-                  <label className="block">
-                    <span className="mb-1 block text-[11px] font-medium text-ink-500">Revisor</span>
-                    <select
-                      value={revisorUsuario}
-                      onChange={(e) => setRevisorUsuario(e.target.value)}
-                      className="rounded-lg border border-ink-200 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
-                    >
-                      <option value="">— Ninguno —</option>
-                      {usuarios.map((u) => (
-                        <option key={u.usuario} value={u.usuario}>
-                          {u.nombre}
-                          {u.usuario === user?.usuario ? " (tú)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 block text-[11px] font-medium text-ink-500">Aprobador</span>
-                    <select
-                      value={aprobadorUsuario}
-                      onChange={(e) => setAprobadorUsuario(e.target.value)}
-                      className="rounded-lg border border-ink-200 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
-                    >
-                      <option value="">— Ninguno —</option>
-                      {usuarios.map((u) => (
-                        <option key={u.usuario} value={u.usuario}>
-                          {u.nombre}
-                          {u.usuario === user?.usuario ? " (tú)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <div className="flex shrink-0 items-start gap-2">
+                  <FirmaSelector
+                    ref={revisorRef}
+                    label="Revisor"
+                    prefijo="supervisor"
+                    usuarios={usuarios}
+                    usuarioActual={user?.usuario}
+                    defaultUsuario={user?.usuario}
+                  />
+                  <FirmaSelector
+                    ref={aprobadorRef}
+                    label="Aprobador"
+                    prefijo="aprobador"
+                    usuarios={usuarios}
+                    usuarioActual={user?.usuario}
+                  />
                   <button
                     onClick={handleGenerar}
-                    className="flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+                    className="mt-[19px] flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
                   >
                     <Download size={14} />
                     Generar reporte (.xlsx)
@@ -411,38 +394,14 @@ function ConfigurarLoteModal({
   onClose: () => void;
   onConfirmar: (overrides: Record<string, string>) => void;
 }) {
-  const toast = useToast();
-  const [nombre, setNombre] = useState("");
-  const [cargo, setCargo] = useState("");
-  const [firmaBase64, setFirmaBase64] = useState<string | null>(null);
-  const [firmaNombreArchivo, setFirmaNombreArchivo] = useState<string | null>(null);
-  const [loadingFirma, setLoadingFirma] = useState(false);
-  const [aprobador, setAprobador] = useState("");
-
-  function handleFirmaChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setLoadingFirma(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      setFirmaBase64(reader.result as string);
-      setFirmaNombreArchivo(file.name);
-      setLoadingFirma(false);
-    };
-    reader.onerror = () => {
-      toast.error("No se pudo leer la imagen.");
-      setLoadingFirma(false);
-    };
-    reader.readAsDataURL(file);
-  }
+  const revisorRef = useRef<FirmaSelectorHandle>(null);
+  const aprobadorRef = useRef<FirmaSelectorHandle>(null);
 
   function handleConfirmar() {
-    const overrides: Record<string, string> = { supervisor_usuario: nombreUsuario };
-    if (nombre.trim()) overrides.supervisor_nombre_manual = nombre.trim();
-    if (cargo.trim()) overrides.supervisor_cargo_manual = cargo.trim();
-    if (firmaBase64) overrides.supervisor_firma_manual = firmaBase64;
-    if (aprobador) overrides.aprobador_usuario = aprobador;
-    onConfirmar(overrides);
+    onConfirmar({
+      ...(revisorRef.current?.getOverrides() ?? {}),
+      ...(aprobadorRef.current?.getOverrides() ?? {}),
+    });
   }
 
   return (
@@ -451,63 +410,31 @@ function ConfigurarLoteModal({
         <div className="flex items-center justify-between border-b border-ink-100 p-5">
           <div>
             <h2 className="text-lg font-bold text-ink-900">Generar {cantidad} reportes</h2>
-            <p className="text-sm text-ink-500">
-              Firma/nombre/cargo para el bloque "Revisado por" — se aplica a todos
-            </p>
+            <p className="text-sm text-ink-500">Revisor y aprobador — se aplica a todos</p>
           </div>
           <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-ink-100">
             <X size={18} />
           </button>
         </div>
 
-        <div className="space-y-3 p-5">
-          <p className="rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-500">
-            Déjalo en blanco para usar tu propia firma de perfil en cada reporte, o llénalo
-            para que TODOS los reportes del lote queden firmados con estos mismos datos.
-          </p>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-ink-700">Nombre</label>
-            <input
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-              placeholder="Ej: Diego Alejandro Hernández"
-              className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-ink-700">Cargo</label>
-            <input
-              value={cargo}
-              onChange={(e) => setCargo(e.target.value)}
-              placeholder="Ej: Coordinador QA"
-              className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
-            />
-          </div>
-          <div className="border-t border-ink-100 pt-3">
-            <label className="mb-1 block text-xs font-medium text-ink-700">Aprobador (bloque AC40-44)</label>
-            <select
-              value={aprobador}
-              onChange={(e) => setAprobador(e.target.value)}
-              className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
-            >
-              <option value="">— Ninguno —</option>
-              {usuarios.map((u) => (
-                <option key={u.usuario} value={u.usuario}>
-                  {u.nombre}
-                  {u.usuario === nombreUsuario ? " (tú)" : ""}
-                  {!u.tieneFirma ? " — sin firma cargada" : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-ink-700">Firma (imagen)</label>
-            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-ink-300 px-4 py-3 text-sm text-ink-600 hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700">
-              {loadingFirma ? <Loader2 size={16} className="animate-spin" /> : <Signature size={16} />}
-              {firmaNombreArchivo ? firmaNombreArchivo : "Subir imagen de firma"}
-              <input type="file" accept="image/*" onChange={handleFirmaChange} className="hidden" />
-            </label>
-          </div>
+        <div className="space-y-4 p-5">
+          <FirmaSelector
+            ref={revisorRef}
+            label="Revisor"
+            prefijo="supervisor"
+            usuarios={usuarios}
+            usuarioActual={nombreUsuario}
+            defaultUsuario={nombreUsuario}
+            className="w-full"
+          />
+          <FirmaSelector
+            ref={aprobadorRef}
+            label="Aprobador"
+            prefijo="aprobador"
+            usuarios={usuarios}
+            usuarioActual={nombreUsuario}
+            className="w-full"
+          />
         </div>
 
         <div className="flex justify-end gap-3 border-t border-ink-100 bg-ink-50 p-4">
