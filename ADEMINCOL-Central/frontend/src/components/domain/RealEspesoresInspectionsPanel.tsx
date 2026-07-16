@@ -382,6 +382,7 @@ export function RealEspesoresInspectionsPanel() {
         <ConfigurarLoteModal
           cantidad={batchGen.selected.size}
           nombreUsuario={user?.usuario ?? ""}
+          usuarios={usuarios}
           onClose={() => setShowLoteModal(false)}
           onConfirmar={(overrides) => {
             setShowLoteModal(false);
@@ -400,11 +401,13 @@ export function RealEspesoresInspectionsPanel() {
 function ConfigurarLoteModal({
   cantidad,
   nombreUsuario,
+  usuarios,
   onClose,
   onConfirmar,
 }: {
   cantidad: number;
   nombreUsuario: string;
+  usuarios: RealUser[];
   onClose: () => void;
   onConfirmar: (overrides: Record<string, string>) => void;
 }) {
@@ -414,6 +417,7 @@ function ConfigurarLoteModal({
   const [firmaBase64, setFirmaBase64] = useState<string | null>(null);
   const [firmaNombreArchivo, setFirmaNombreArchivo] = useState<string | null>(null);
   const [loadingFirma, setLoadingFirma] = useState(false);
+  const [aprobador, setAprobador] = useState("");
 
   function handleFirmaChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -437,6 +441,7 @@ function ConfigurarLoteModal({
     if (nombre.trim()) overrides.supervisor_nombre_manual = nombre.trim();
     if (cargo.trim()) overrides.supervisor_cargo_manual = cargo.trim();
     if (firmaBase64) overrides.supervisor_firma_manual = firmaBase64;
+    if (aprobador) overrides.aprobador_usuario = aprobador;
     onConfirmar(overrides);
   }
 
@@ -477,6 +482,23 @@ function ConfigurarLoteModal({
               placeholder="Ej: Coordinador QA"
               className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
             />
+          </div>
+          <div className="border-t border-ink-100 pt-3">
+            <label className="mb-1 block text-xs font-medium text-ink-700">Aprobador (bloque AC40-44)</label>
+            <select
+              value={aprobador}
+              onChange={(e) => setAprobador(e.target.value)}
+              className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
+            >
+              <option value="">— Ninguno —</option>
+              {usuarios.map((u) => (
+                <option key={u.usuario} value={u.usuario}>
+                  {u.nombre}
+                  {u.usuario === nombreUsuario ? " (tú)" : ""}
+                  {!u.tieneFirma ? " — sin firma cargada" : ""}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-ink-700">Firma (imagen)</label>

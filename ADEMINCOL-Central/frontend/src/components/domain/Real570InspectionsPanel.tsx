@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, ImageIcon, Layers, PencilLine } from "lucide-react";
+import { Download, Eye, ImageIcon, Layers, PencilLine, X } from "lucide-react";
 import {
   downloadJobResult,
   fetchReal570InspectionDetail,
@@ -40,6 +40,7 @@ export function Real570InspectionsPanel() {
   const pollRef = useRef<number | null>(null);
   const [query, setQuery] = useState("");
   const batchGen = useBatchGeneration("570");
+  const [showLoteModal, setShowLoteModal] = useState(false);
 
   // Bloques "Revisado por" (Y165-169) y "Aprobado por" (AN165-169) — pedido
   // explícito del usuario 2026-07-14: libertad de elegir, entre los usuarios
@@ -155,7 +156,7 @@ export function Real570InspectionsPanel() {
           <div className="flex items-center justify-between gap-2 border-b border-brand-100 bg-brand-50 px-3 py-2">
             <span className="text-xs font-medium text-brand-700">{batchGen.selected.size} seleccionados</span>
             <button
-              onClick={() => batchGen.startBatch()}
+              onClick={() => setShowLoteModal(true)}
               disabled={!!batchGen.batch?.corriendo}
               className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
             >
@@ -366,6 +367,117 @@ export function Real570InspectionsPanel() {
             <FotosPorSeccion fotos={detail.fotos} />
           </div>
         )}
+      </div>
+
+      {showLoteModal && (
+        <ConfigurarLoteModal570
+          cantidad={batchGen.selected.size}
+          nombreUsuario={user?.usuario ?? ""}
+          usuarios={usuarios}
+          onClose={() => setShowLoteModal(false)}
+          onConfirmar={(overrides) => {
+            setShowLoteModal(false);
+            batchGen.startBatch(overrides);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal para elegir revisor/aprobador (bloques Y165-169/AN165-169) aplicados
+// a TODOS los reportes de un lote — el flujo individual ya tenía estos
+// selects (arriba), pero "Generar seleccionados (.zip)" no tenía forma de
+// elegirlos (pedido del usuario 2026-07-16: "no me da la opción de colocar
+// las firmas... de quién revisó y quién aprobó" — se refería al lote).
+function ConfigurarLoteModal570({
+  cantidad,
+  nombreUsuario,
+  usuarios,
+  onClose,
+  onConfirmar,
+}: {
+  cantidad: number;
+  nombreUsuario: string;
+  usuarios: RealUser[];
+  onClose: () => void;
+  onConfirmar: (overrides: Record<string, string>) => void;
+}) {
+  const [revisor, setRevisor] = useState(nombreUsuario);
+  const [aprobador, setAprobador] = useState("");
+
+  function handleConfirmar() {
+    const overrides: Record<string, string> = {};
+    if (revisor) overrides.revisor_usuario = revisor;
+    if (aprobador) overrides.aprobador_usuario = aprobador;
+    onConfirmar(overrides);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-ink-100 p-5">
+          <div>
+            <h2 className="text-lg font-bold text-ink-900">Generar {cantidad} reportes</h2>
+            <p className="text-sm text-ink-500">Revisor y aprobador — se aplica a todos</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-ink-100">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-3 p-5">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-ink-700">Revisor</label>
+            <select
+              value={revisor}
+              onChange={(e) => setRevisor(e.target.value)}
+              className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
+            >
+              <option value="">— Ninguno —</option>
+              {usuarios.map((u) => (
+                <option key={u.usuario} value={u.usuario}>
+                  {u.nombre}
+                  {u.usuario === nombreUsuario ? " (tú)" : ""}
+                  {!u.tieneFirma ? " — sin firma cargada" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-ink-700">Aprobador</label>
+            <select
+              value={aprobador}
+              onChange={(e) => setAprobador(e.target.value)}
+              className="w-full rounded border border-ink-200 px-2.5 py-1.5 text-sm outline-none focus:border-brand-600"
+            >
+              <option value="">— Ninguno —</option>
+              {usuarios.map((u) => (
+                <option key={u.usuario} value={u.usuario}>
+                  {u.nombre}
+                  {u.usuario === nombreUsuario ? " (tú)" : ""}
+                  {!u.tieneFirma ? " — sin firma cargada" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-ink-100 p-4">
+          <button
+            onClick={onClose}
+            className="rounded-lg px-3.5 py-2 text-xs font-semibold text-ink-500 hover:bg-ink-100"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleConfirmar}
+            className="flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+          >
+            <Download size={14} />
+            Generar lote
+          </button>
+        </div>
       </div>
     </div>
   );
