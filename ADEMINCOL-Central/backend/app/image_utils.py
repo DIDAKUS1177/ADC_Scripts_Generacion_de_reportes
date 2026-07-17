@@ -19,6 +19,7 @@ from openpyxl.styles import Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
 from openpyxl.utils.units import pixels_to_EMU
+from openpyxl.worksheet.pagebreak import Break
 
 logger = logging.getLogger("image_utils")
 
@@ -306,3 +307,66 @@ def marcar_celda_sin_imagen(ws, celda_ancla: str):
         diagonal=Side(style="thin", color="FF000000"),
         diagonalUp=True, diagonalDown=False,
     )
+
+
+def _alto_pagina_imprimible_pt(ws) -> float:
+    """Alto imprimible de una página (puntos), asumiendo A4 (`paperSize` no
+    viene seteado en las plantillas — la organización opera en Colombia,
+    donde A4 es el estándar; si algún día se necesita Carta, este es el
+    único lugar que tocar)."""
+    ALTO_A4_MM = 297.0
+    alto_pagina_in = ALTO_A4_MM / 25.4
+    m = ws.page_margins
+    alto_margenes_in = (m.top or 0) + (m.bottom or 0) + (m.header or 0) + (m.footer or 0)
+    return (alto_pagina_in - alto_margenes_in) * 72
+
+
+def evitar_fotos_partidas_entre_paginas(ws):
+    """Inserta saltos de página manuales para que ninguna foto quede
+    partida a la mitad entre dos páginas impresas — reportado por el
+    usuario 2026-07-16 con una captura mostrando justo eso: una cuadrícula
+    de fotos cortada entre las páginas 2 y 3 (los números de página de
+    Excel en Vista previa de salto de página, visibles cruzando las
+    fotos).
+
+    Causa: cada fila de foto (alta, ~252pt) + su fila de descripción
+    inmediata debajo forman una sola unidad visual, pero Excel calcula
+    los saltos de página automáticos por altura acumulada SIN saber que
+    esas dos filas van juntas — con reportes de cientos de fotos, tarde o
+    temprano un salto cae justo en medio de alguna.
+
+    Simula la paginación automática de Excel fila por fila (misma lógica:
+    acumular alturas hasta que no quepa la siguiente), pero cuando la fila
+    que no cabe es la fila de FOTO de un par foto+descripción, mueve el
+    salto a ANTES del par completo en vez de dejarlo caer entre las dos.
+    Es una heurística (el alto real de página en Excel puede variar unos
+    puntos por redondeo de fuente/DPI) — no garantiza pixel-perfect, pero
+    evita el caso reportado en la inmensa mayoría de los casos."""
+    filas_con_foto = {img.anchor._from.row + 1 for img in ws._images}
+    if not filas_con_foto:
+        return
+
+    alto_pagina = _alto_pagina_imprimible_pt(ws)
+
+    def _alto_fila_o_default(fila: int) -> float:
+        dim = ws.row_dimensions.get(fila)
+        return dim.height if dim and dim.height else 15.0
+
+    acumulado = 0.0
+    fila = 1
+    max_row = ws.max_row
+    while fila <= max_row:
+        if fila in filas_con_foto:
+            alto_par = _alto_fila_o_default(fila) + _alto_fila_o_default(fila + 1)
+            if acumulado > 0 and acumulado + alto_par > alto_pagina:
+                ws.row_breaks.append(Break(id=fila - 1))
+                acumulado = 0.0
+            acumulado += alto_par
+            fila += 2
+            continue
+        alto = _alto_fila_o_default(fila)
+        if acumulado > 0 and acumulado + alto > alto_pagina:
+            ws.row_breaks.append(Break(id=fila - 1))
+            acumulado = 0.0
+        acumulado += alto
+        fila += 1

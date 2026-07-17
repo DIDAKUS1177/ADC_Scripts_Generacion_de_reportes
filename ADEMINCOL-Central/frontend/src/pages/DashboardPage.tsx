@@ -100,6 +100,109 @@ function buildGroupedBarData(
   return { chartData, tecnicas };
 }
 
+// Gráfico "Reportes generados por inspector" — pedido explícito del
+// usuario 2026-07-16: barras verticales (antes horizontales, `layout=
+// "vertical"` de recharts = barras que crecen hacia la derecha), poder
+// ocultar técnicas de la leyenda con un clic (para comparar "solo los de
+// MT", por ejemplo) y filtrar por nombre (para comparar "solo a 3
+// personas"). El filtro de nombre reduce las FILAS que entran al
+// gráfico; el clic en la leyenda oculta/muestra una serie completa (una
+// técnica) sin perder el resto — ambos mecanismos se combinan.
+function InspectorReportsChart({
+  chart,
+}: {
+  chart: { chartData: Array<Record<string, string | number>>; tecnicas: string[] };
+}) {
+  const [filtroNombre, setFiltroNombre] = useState("");
+  const [tecnicasOcultas, setTecnicasOcultas] = useState<Set<string>>(new Set());
+
+  function toggleTecnica(dataKey: string) {
+    setTecnicasOcultas((prev) => {
+      const next = new Set(prev);
+      if (next.has(dataKey)) next.delete(dataKey);
+      else next.add(dataKey);
+      return next;
+    });
+  }
+
+  const datosFiltrados = chart.chartData.filter((d) =>
+    String(d.name).toLowerCase().includes(filtroNombre.trim().toLowerCase())
+  );
+
+  if (chart.chartData.length === 0) return <EmptyRow />;
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          value={filtroNombre}
+          onChange={(e) => setFiltroNombre(e.target.value)}
+          placeholder="Filtrar por nombre de inspector..."
+          className="w-full max-w-xs rounded-lg border border-ink-200 px-3 py-1.5 text-xs outline-none focus:border-brand-600"
+        />
+        {filtroNombre && (
+          <button
+            onClick={() => setFiltroNombre("")}
+            className="text-xs font-medium text-ink-400 hover:text-ink-700"
+          >
+            Limpiar
+          </button>
+        )}
+        <span className="text-[11px] text-ink-400">
+          Clic en la leyenda para ocultar/mostrar una técnica
+        </span>
+      </div>
+
+      {datosFiltrados.length === 0 ? (
+        <EmptyRow />
+      ) : (
+        <div className="overflow-x-auto">
+          <div style={{ minWidth: Math.max(560, datosFiltrados.length * 72) }}>
+            <ResponsiveContainer width="100%" height={380}>
+              <BarChart data={datosFiltrados} margin={{ top: 4, right: 12, left: 4, bottom: 70 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 10 }}
+                  angle={-40}
+                  textAnchor="end"
+                  interval={0}
+                  height={80}
+                  tickFormatter={(v: string) => (v.length > 18 ? v.slice(0, 16) + "…" : v)}
+                />
+                <YAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }} />
+                <Legend
+                  wrapperStyle={{ fontSize: 11, paddingTop: 8, cursor: "pointer" }}
+                  onClick={(e) => toggleTecnica(String(e.dataKey))}
+                  formatter={(value: string, entry: { dataKey?: string | number }) => (
+                    <span style={{ opacity: tecnicasOcultas.has(String(entry.dataKey)) ? 0.35 : 1 }}>
+                      {value}
+                    </span>
+                  )}
+                />
+                {chart.tecnicas.map((t) => (
+                  <Bar
+                    key={t}
+                    dataKey={t}
+                    name={t}
+                    stackId="tecnica"
+                    fill={colorParaTecnica(t)}
+                    stroke="#fcfcfb"
+                    strokeWidth={2}
+                    barSize={28}
+                    hide={tecnicasOcultas.has(t)}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---- ADMINISTRADOR: visión global del negocio ("los activos") ----
 function AdminDashboard({ data }: { data: RealDashboardData }) {
   const totalReportes = Object.values(data.reportesPorTipo).reduce((a, r) => a + r.total, 0);
@@ -120,43 +223,7 @@ function AdminDashboard({ data }: { data: RealDashboardData }) {
       {/* ---- El gráfico más importante: ancho completo, arriba de todo lo demás ---- */}
       <div className="mt-8">
         <Panel title="Reportes generados por inspector">
-          {inspectorChart.chartData.length === 0 ? (
-            <EmptyRow />
-          ) : (
-            <ResponsiveContainer width="100%" height={Math.max(240, inspectorChart.chartData.length * 42)}>
-              <BarChart
-                data={inspectorChart.chartData}
-                layout="vertical"
-                margin={{ top: 4, right: 20, left: 4, bottom: 4 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  width={160}
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={(v: string) => v.length > 24 ? v.slice(0, 22) + "…" : v}
-                />
-                <Tooltip
-                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }}
-                />
-                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                {inspectorChart.tecnicas.map((t) => (
-                  <Bar
-                    key={t}
-                    dataKey={t}
-                    name={t}
-                    stackId="tecnica"
-                    fill={colorParaTecnica(t)}
-                    stroke="#fcfcfb"
-                    strokeWidth={2}
-                    barSize={18}
-                  />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
-          )}
+          <InspectorReportsChart chart={inspectorChart} />
         </Panel>
       </div>
 

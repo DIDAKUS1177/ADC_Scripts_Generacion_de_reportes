@@ -27,6 +27,7 @@ from openpyxl.utils import get_column_letter
 from .image_utils import (
     desactivar_fit_to_page,
     descargar_imagen,
+    evitar_fotos_partidas_entre_paginas,
     insertar_imagen_centrada,
     marcar_celda_sin_imagen,
     precargar_fotos,
@@ -420,6 +421,9 @@ def generar_reporte_espesores(
             insertar_imagen_centrada(
                 ws, firma_aprobador_bytes, f"{col_fs}{fila_fs + filas_extra}", recortar_contenido=True
             )
+
+    _reportar(96, "Ajustando saltos de página")
+    evitar_fotos_partidas_entre_paginas(ws)
 
     _reportar(97, "Guardando archivo")
     buffer = io.BytesIO()
