@@ -123,7 +123,7 @@ export function RealMtInspectionsPanel() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <div className={`grid grid-cols-1 gap-6 ${selected ? "lg:grid-cols-2" : ""}`}>
       <div className="max-h-[70vh] flex flex-col rounded-xl border border-ink-200 bg-white">
         <div className="border-b border-ink-200 p-3">
           <input
