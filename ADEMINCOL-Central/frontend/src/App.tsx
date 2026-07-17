@@ -1,7 +1,9 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
+import { JobsProvider } from "./context/JobsContext";
 import { ToastProvider } from "./components/ui/Toast";
+import { GlobalJobsWidget } from "./components/domain/GlobalJobsWidget";
 import { AppShell } from "./components/layout/AppShell";
 import { ProtectedRoute } from "./components/layout/ProtectedRoute";
 import { LoginPage } from "./pages/LoginPage";
@@ -21,6 +23,7 @@ export default function App() {
       <ThemeProvider>
       <AuthProvider>
         <ToastProvider>
+        <JobsProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route
@@ -76,6 +79,8 @@ export default function App() {
               <Route path="/perfil" element={<ProfilePage />} />
             </Route>
           </Routes>
+          <GlobalJobsWidget />
+        </JobsProvider>
         </ToastProvider>
       </AuthProvider>
       </ThemeProvider>

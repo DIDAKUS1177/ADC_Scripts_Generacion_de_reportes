@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, BarChart3, Download, Eye, Layers, Loader2, PencilLine, Signature, X } from "lucide-react";
 import {
-  downloadJobResult,
   fetchRealPmiInspectionDetail,
   fetchRealPmiInspections,
   fetchRealUsers,
-  getJobStatus,
   pmiGraficoDurezasUrl,
   startReportJob,
   PreviewApiError,
@@ -19,6 +17,7 @@ import { AdvertenciasCell } from "../ui/AdvertenciasCell";
 import { PhotoGallery } from "../ui/PhotoGallery";
 import { useToast } from "../ui/Toast";
 import { useAuth } from "../../context/AuthContext";
+import { useJobs } from "../../context/JobsContext";
 import { useBatchGeneration } from "./useBatchGeneration";
 import { BatchGenerationStatus } from "./BatchGenerationStatus";
 
@@ -29,14 +28,13 @@ import { BatchGenerationStatus } from "./BatchGenerationStatus";
 export function RealPmiInspectionsPanel() {
   const toast = useToast();
   const { user } = useAuth();
+  const { startJob } = useJobs();
   const [items, setItems] = useState<PmiPreviewItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<PmiPreviewDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const [job, setJob] = useState<{ pct: number; etapa: string } | null>(null);
-  const pollRef = useRef<number | null>(null);
   const [query, setQuery] = useState("");
   const [elementoGrafico, setElementoGrafico] = useState("TUBERIA");
   const [graficoError, setGraficoError] = useState(false);
@@ -79,9 +77,6 @@ export function RealPmiInspectionsPanel() {
 
   useEffect(() => {
     load();
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    };
   }, []);
 
   function openDetail(idGeneral: string) {
@@ -97,41 +92,17 @@ export function RealPmiInspectionsPanel() {
   }
 
   async function handleGenerar() {
-    if (!selected || job) return;
-    setJob({ pct: 0, etapa: "Iniciando..." });
+    if (!selected) return;
+    const idInforme = selected;
     try {
-      const jobId = await startReportJob("pmi", selected, {
+      const jobId = await startReportJob("pmi", idInforme, {
         ...edits,
         elemento_grafico: elementoGrafico,
         supervisor_usuario: revisorUsuario || user?.usuario || "",
       });
-      pollRef.current = window.setInterval(async () => {
-        try {
-          const status = await getJobStatus(jobId);
-          if (status.estado === "RUNNING") {
-            setJob({ pct: status.pct, etapa: status.etapa });
-            return;
-          }
-          if (pollRef.current) window.clearInterval(pollRef.current);
-          pollRef.current = null;
-          if (status.estado === "DONE") {
-            setJob({ pct: 100, etapa: "Descargando..." });
-            await downloadJobResult(jobId, "pmi", selected);
-            toast.success("Reporte generado y descargado.");
-            status.warnings.forEach((w) => toast.error(`⚠️ ${w}`));
-          } else {
-            toast.error(status.error || "Error al generar el reporte.");
-          }
-          setJob(null);
-        } catch {
-          if (pollRef.current) window.clearInterval(pollRef.current);
-          pollRef.current = null;
-          setJob(null);
-          toast.error("Se perdió la conexión con el backend.");
-        }
-      }, 700);
+      startJob(jobId, "pmi", idInforme, `PMI · ${idInforme}`);
+      toast.success("Generación iniciada — sigue el progreso en la esquina inferior izquierda.");
     } catch (e) {
-      setJob(null);
       toast.error(e instanceof PreviewApiError ? e.message : "Error al iniciar la generación.");
     }
   }
@@ -255,48 +226,31 @@ export function RealPmiInspectionsPanel() {
                   {detail.cliente} · {detail.fecha}
                 </p>
               </div>
-              {!job && (
-                <div className="flex shrink-0 items-end gap-2">
-                  <label className="block">
-                    <span className="mb-1 block text-[11px] font-medium text-ink-500">Revisor</span>
-                    <select
-                      value={revisorUsuario}
-                      onChange={(e) => setRevisorUsuario(e.target.value)}
-                      className="rounded-lg border border-ink-200 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
-                    >
-                      {usuarios.map((u) => (
-                        <option key={u.usuario} value={u.usuario}>
-                          {u.nombre}
-                          {u.usuario === user?.usuario ? " (tú)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    onClick={handleGenerar}
-                    className="flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+              <div className="flex shrink-0 items-end gap-2">
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-medium text-ink-500">Revisor</span>
+                  <select
+                    value={revisorUsuario}
+                    onChange={(e) => setRevisorUsuario(e.target.value)}
+                    className="rounded-lg border border-ink-200 px-2 py-1.5 text-xs outline-none focus:border-brand-600"
                   >
-                    <Download size={14} />
-                    Generar reporte (.xlsx)
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {job && (
-              <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50 p-3">
-                <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-brand-700">
-                  <span>{job.etapa}</span>
-                  <span>{job.pct}%</span>
-                </div>
-                <div className="h-2.5 overflow-hidden rounded-full bg-brand-100">
-                  <div
-                    className="h-full rounded-full bg-brand-600 transition-all duration-500"
-                    style={{ width: `${job.pct}%` }}
-                  />
-                </div>
+                    {usuarios.map((u) => (
+                      <option key={u.usuario} value={u.usuario}>
+                        {u.nombre}
+                        {u.usuario === user?.usuario ? " (tú)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  onClick={handleGenerar}
+                  className="flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+                >
+                  <Download size={14} />
+                  Generar reporte (.xlsx)
+                </button>
               </div>
-            )}
+            </div>
 
             <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-400">
               Datos generales

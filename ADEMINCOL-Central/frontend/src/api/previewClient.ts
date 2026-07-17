@@ -595,7 +595,13 @@ export async function downloadJobResult(
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `Reporte_${tipo.toUpperCase()}_${idInforme}.xlsx`;
+  // Usa el nombre real que arma el backend (ej. sistema_subsistema_id para
+  // 570, ver main.py) en vez de inventar uno genérico — bug encontrado
+  // 2026-07-16 al agregar ese nombre: esta función lo ignoraba por
+  // completo y siempre descargaba como "Reporte_<TIPO>_<id>.xlsx".
+  const cd = res.headers.get("Content-Disposition") || "";
+  const match = cd.match(/filename="?([^"]+)"?/);
+  a.download = match ? match[1] : `Reporte_${tipo.toUpperCase()}_${idInforme}.xlsx`;
   document.body.appendChild(a);
   a.click();
   a.remove();

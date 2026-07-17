@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Eye, ImageIcon, Layers, PencilLine, X } from "lucide-react";
 import {
-  downloadJobResult,
   fetchReal570InspectionDetail,
   fetchReal570Inspections,
   fetchRealUsers,
-  getJobStatus,
   startReportJob,
   PreviewApiError,
   type RealUser,
@@ -17,6 +15,7 @@ import { Badge } from "../ui/Badge";
 import { AdvertenciasCell } from "../ui/AdvertenciasCell";
 import { useToast } from "../ui/Toast";
 import { useAuth } from "../../context/AuthContext";
+import { useJobs } from "../../context/JobsContext";
 import { useBatchGeneration } from "./useBatchGeneration";
 import { BatchGenerationStatus } from "./BatchGenerationStatus";
 import { FotosPorSeccion } from "./FotosPorSeccion";
@@ -31,14 +30,13 @@ import { FirmaSelector, type FirmaSelectorHandle } from "./FirmaSelector";
 export function Real570InspectionsPanel() {
   const toast = useToast();
   const { user } = useAuth();
+  const { startJob } = useJobs();
   const [items, setItems] = useState<Sh570PreviewItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Sh570PreviewDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const [job, setJob] = useState<{ pct: number; etapa: string } | null>(null);
-  const pollRef = useRef<number | null>(null);
   const [query, setQuery] = useState("");
   const batchGen = useBatchGeneration("570");
   const [showLoteModal, setShowLoteModal] = useState(false);
@@ -79,9 +77,6 @@ export function Real570InspectionsPanel() {
 
   useEffect(() => {
     load();
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    };
   }, []);
 
   function openDetail(idApi570: string) {
@@ -95,41 +90,22 @@ export function Real570InspectionsPanel() {
   }
 
   async function handleGenerar() {
-    if (!selected || job) return;
-    setJob({ pct: 0, etapa: "Iniciando..." });
+    if (!selected) return;
+    const idInforme = selected;
     try {
-      const jobId = await startReportJob("570", selected, {
+      const jobId = await startReportJob("570", idInforme, {
         ...edits,
         ...(revisorRef.current?.getOverrides() ?? {}),
         ...(aprobadorRef.current?.getOverrides() ?? {}),
       });
-      pollRef.current = window.setInterval(async () => {
-        try {
-          const status = await getJobStatus(jobId);
-          if (status.estado === "RUNNING") {
-            setJob({ pct: status.pct, etapa: status.etapa });
-            return;
-          }
-          if (pollRef.current) window.clearInterval(pollRef.current);
-          pollRef.current = null;
-          if (status.estado === "DONE") {
-            setJob({ pct: 100, etapa: "Descargando..." });
-            await downloadJobResult(jobId, "570", selected);
-            toast.success("Reporte generado y descargado.");
-            status.warnings.forEach((w) => toast.error(`⚠️ ${w}`));
-          } else {
-            toast.error(status.error || "Error al generar el reporte.");
-          }
-          setJob(null);
-        } catch {
-          if (pollRef.current) window.clearInterval(pollRef.current);
-          pollRef.current = null;
-          setJob(null);
-          toast.error("Se perdió la conexión con el backend.");
-        }
-      }, 700);
+      // El seguimiento vive en JobsContext (widget flotante global) para
+      // que siga corriendo aunque el usuario cambie de página — pedido
+      // 2026-07-16: "si cambio de pestaña, ¿hay manera que no pare de
+      // generarse?". La generación en sí ya corría en el backend sin
+      // detenerse; lo que se perdía era este seguimiento local.
+      startJob(jobId, "570", idInforme, `570 · ${idInforme}`);
+      toast.success("Generación iniciada — sigue el progreso en la esquina inferior izquierda.");
     } catch (e) {
-      setJob(null);
       toast.error(e instanceof PreviewApiError ? e.message : "Error al iniciar la generación.");
     }
   }
@@ -257,51 +233,31 @@ export function Real570InspectionsPanel() {
                   {detail.cliente} · {detail.fecha || "sin fecha"} · OT: {detail.workOrderNumero || "sin OT"}
                 </p>
               </div>
-              {!job && (
-                <div className="flex shrink-0 items-start gap-2">
-                  <FirmaSelector
-                    ref={revisorRef}
-                    label="Revisor"
-                    prefijo="revisor"
-                    usuarios={usuarios}
-                    usuarioActual={user?.usuario}
-                    defaultUsuario={user?.usuario}
-                  />
-                  <FirmaSelector
-                    ref={aprobadorRef}
-                    label="Aprobador"
-                    prefijo="aprobador"
-                    usuarios={usuarios}
-                    usuarioActual={user?.usuario}
-                  />
-                  <button
-                    onClick={handleGenerar}
-                    className="mt-[19px] flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
-                  >
-                    <Download size={14} />
-                    Generar reporte (.xlsx)
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {job && (
-              <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50 p-3">
-                <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-brand-700">
-                  <span>{job.etapa}</span>
-                  <span>{job.pct}%</span>
-                </div>
-                <div className="h-2.5 overflow-hidden rounded-full bg-brand-100">
-                  <div
-                    className="h-full rounded-full bg-brand-600 transition-all duration-500"
-                    style={{ width: `${job.pct}%` }}
-                  />
-                </div>
-                <p className="mt-1.5 text-[11px] text-brand-600">
-                  Reportes con muchas fotos pueden tardar varios minutos — se descargan e insertan una por una.
-                </p>
+              <div className="flex shrink-0 items-start gap-2">
+                <FirmaSelector
+                  ref={revisorRef}
+                  label="Revisor"
+                  prefijo="revisor"
+                  usuarios={usuarios}
+                  usuarioActual={user?.usuario}
+                  defaultUsuario={user?.usuario}
+                />
+                <FirmaSelector
+                  ref={aprobadorRef}
+                  label="Aprobador"
+                  prefijo="aprobador"
+                  usuarios={usuarios}
+                  usuarioActual={user?.usuario}
+                />
+                <button
+                  onClick={handleGenerar}
+                  className="mt-[19px] flex items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+                >
+                  <Download size={14} />
+                  Generar reporte (.xlsx)
+                </button>
               </div>
-            )}
+            </div>
 
             <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-400">
               Datos generales

@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Eye, ImageIcon, Layers, PencilLine } from "lucide-react";
 import {
-  downloadJobResult,
   fetchRealAcfmInspectionDetail,
   fetchRealAcfmInspections,
-  getJobStatus,
   startReportJob,
   PreviewApiError,
   type AcfmPreviewDetail,
@@ -14,6 +12,7 @@ import { Spinner, EmptyState, ErrorState } from "../ui/States";
 import { Badge } from "../ui/Badge";
 import { AdvertenciasCell } from "../ui/AdvertenciasCell";
 import { useToast } from "../ui/Toast";
+import { useJobs } from "../../context/JobsContext";
 import { useBatchGeneration } from "./useBatchGeneration";
 import { BatchGenerationStatus } from "./BatchGenerationStatus";
 import { FotosPorSeccion } from "./FotosPorSeccion";
@@ -25,14 +24,13 @@ import { FotosPorSeccion } from "./FotosPorSeccion";
 // reales en el Sheet, así que sigue el mismo patrón que 570/510.
 export function RealAcfmInspectionsPanel() {
   const toast = useToast();
+  const { startJob } = useJobs();
   const [items, setItems] = useState<AcfmPreviewItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<AcfmPreviewDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const [job, setJob] = useState<{ pct: number; etapa: string } | null>(null);
-  const pollRef = useRef<number | null>(null);
   const [query, setQuery] = useState("");
   const batchGen = useBatchGeneration("acfm");
 
@@ -56,9 +54,6 @@ export function RealAcfmInspectionsPanel() {
 
   useEffect(() => {
     load();
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    };
   }, []);
 
   function openDetail(idGeneral: string) {
@@ -72,37 +67,13 @@ export function RealAcfmInspectionsPanel() {
   }
 
   async function handleGenerar() {
-    if (!selected || job) return;
-    setJob({ pct: 0, etapa: "Iniciando..." });
+    if (!selected) return;
+    const idInforme = selected;
     try {
-      const jobId = await startReportJob("acfm", selected, edits);
-      pollRef.current = window.setInterval(async () => {
-        try {
-          const status = await getJobStatus(jobId);
-          if (status.estado === "RUNNING") {
-            setJob({ pct: status.pct, etapa: status.etapa });
-            return;
-          }
-          if (pollRef.current) window.clearInterval(pollRef.current);
-          pollRef.current = null;
-          if (status.estado === "DONE") {
-            setJob({ pct: 100, etapa: "Descargando..." });
-            await downloadJobResult(jobId, "acfm", selected);
-            toast.success("Reporte generado y descargado.");
-            status.warnings.forEach((w) => toast.error(`⚠️ ${w}`));
-          } else {
-            toast.error(status.error || "Error al generar el reporte.");
-          }
-          setJob(null);
-        } catch {
-          if (pollRef.current) window.clearInterval(pollRef.current);
-          pollRef.current = null;
-          setJob(null);
-          toast.error("Se perdió la conexión con el backend.");
-        }
-      }, 700);
+      const jobId = await startReportJob("acfm", idInforme, edits);
+      startJob(jobId, "acfm", idInforme, `ACFM · ${idInforme}`);
+      toast.success("Generación iniciada — sigue el progreso en la esquina inferior izquierda.");
     } catch (e) {
-      setJob(null);
       toast.error(e instanceof PreviewApiError ? e.message : "Error al iniciar la generación.");
     }
   }
@@ -228,31 +199,14 @@ export function RealAcfmInspectionsPanel() {
                   {detail.cliente} · {detail.fecha || "sin fecha"} · OT: {detail.workOrderNumero || "sin OT"}
                 </p>
               </div>
-              {!job && (
-                <button
-                  onClick={handleGenerar}
-                  className="flex shrink-0 items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
-                >
-                  <Download size={14} />
-                  Generar reporte (.xlsx)
-                </button>
-              )}
+              <button
+                onClick={handleGenerar}
+                className="flex shrink-0 items-center gap-2 rounded-lg bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-brand-700"
+              >
+                <Download size={14} />
+                Generar reporte (.xlsx)
+              </button>
             </div>
-
-            {job && (
-              <div className="mb-4 rounded-lg border border-brand-200 bg-brand-50 p-3">
-                <div className="mb-1.5 flex items-center justify-between text-xs font-medium text-brand-700">
-                  <span>{job.etapa}</span>
-                  <span>{job.pct}%</span>
-                </div>
-                <div className="h-2.5 overflow-hidden rounded-full bg-brand-100">
-                  <div
-                    className="h-full rounded-full bg-brand-600 transition-all duration-500"
-                    style={{ width: `${job.pct}%` }}
-                  />
-                </div>
-              </div>
-            )}
 
             <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase text-ink-400">
               Datos generales

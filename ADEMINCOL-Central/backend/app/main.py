@@ -79,6 +79,13 @@ app.add_middleware(
     allow_origins=["http://localhost:5174", "http://localhost:5173"],
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
+    # Sin esto, el navegador NO deja leer el header Content-Disposition
+    # desde JS aunque el backend lo mande (CORS solo expone por default un
+    # safelist que no incluye este header) — bug encontrado 2026-07-16 al
+    # verificar que downloadJobResult() usara el nombre real del archivo
+    # (ej. sistema_subsistema_id para 570): `res.headers.get(...)` siempre
+    # devolvía null en el navegador aunque `curl -I` sí lo mostrara.
+    expose_headers=["Content-Disposition"],
 )
 
 # Jobs de generación en memoria: {job_id: {estado, pct, etapa, error, archivo, nombre}}
