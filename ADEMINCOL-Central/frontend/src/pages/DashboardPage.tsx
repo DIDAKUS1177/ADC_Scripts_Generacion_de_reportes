@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
-import { ClipboardList, FileCheck2, Clock3, Users, AlertTriangle, Wrench } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ClipboardList, FileCheck2, Clock3, Users, AlertTriangle, Wrench,
+  ArrowDownAZ, ArrowDownWideNarrow, X, ChevronDown, RotateCcw,
+} from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid,
 } from "recharts";
@@ -26,12 +29,26 @@ const TECNICA_COLORS: Record<string, string> = {
   ACFM: "#eb6834",         // slot 8 — orange
 };
 
+// Colores por estado de OT — mismo criterio que OTStatusBadge (ver
+// components/ui/StatusBadge.tsx: gray/blue/green/red), pero en hex para
+// las barras de recharts.
+const ESTADO_COLORS: Record<string, string> = {
+  PENDIENTE: "#a8a29e",
+  EN_CURSO: "#0ea5e9",
+  COMPLETADA: "#10b981",
+  CANCELADA: "#dc2626",
+};
+
 function normalizarTecnica(tecnica: string): string {
   return tecnica === "SCANC_LINEAS" || tecnica === "SCANC_RP" ? "SCANC" : tecnica;
 }
 
 function colorParaTecnica(tecnica: string): string {
   return TECNICA_COLORS[normalizarTecnica(tecnica)] || "#89877e";
+}
+
+function colorParaEstado(estado: string): string {
+  return ESTADO_COLORS[estado] || "#89877e";
 }
 
 // Dashboard con datos REALES (BD Sheets + Sheets de MT/PMI/570), diferenciado
@@ -100,61 +117,223 @@ function buildGroupedBarData(
   return { chartData, tecnicas };
 }
 
-// Gráfico "Reportes generados por inspector" — pedido explícito del
-// usuario 2026-07-16: barras verticales (antes horizontales, `layout=
-// "vertical"` de recharts = barras que crecen hacia la derecha), poder
-// ocultar técnicas de la leyenda con un clic (para comparar "solo los de
-// MT", por ejemplo) y filtrar por nombre (para comparar "solo a 3
-// personas"). El filtro de nombre reduce las FILAS que entran al
-// gráfico; el clic en la leyenda oculta/muestra una serie completa (una
-// técnica) sin perder el resto — ambos mecanismos se combinan.
-function InspectorReportsChart({
+// ---- Gráfico de barras verticales, agrupado por técnica, con filtros
+// reales — pedido explícito del usuario 2026-07-16/17: "quiero que ese
+// gráfico se pueda ocultar cosas de la leyenda, que sean barras
+// verticales, y que se pueda filtrar por nombre... si quiero comparar
+// solo a los de MT, solo a 3 personas, cosas así" + "hazlo con ganas,
+// bastante completo, con filtros de verdad, poder ordenarlo bien".
+//
+// Tres mecanismos de filtro, combinables:
+// 1. Chips de técnica (clic para ocultar/mostrar) — cubre "solo los de
+//    MT": al ocultar todas las demás técnicas, las filas que quedan en
+//    cero desaparecen del todo (no se quedan como barras vacías).
+// 2. Selector de personas (checklist) — cubre "solo a 3 personas": a
+//    diferencia del filtro de texto (que solo sirve para UN patrón), este
+//    permite elegir cualquier combinación exacta de nombres.
+// 3. Filtro de texto libre — atajo rápido para buscar por coincidencia.
+// Más orden (alfabético / de mayor a menor total visible).
+function GroupedBarChart({
   chart,
+  colorFn = colorParaTecnica,
 }: {
   chart: { chartData: Array<Record<string, string | number>>; tecnicas: string[] };
+  colorFn?: (clave: string) => string;
 }) {
-  const [filtroNombre, setFiltroNombre] = useState("");
+  const [filtroTexto, setFiltroTexto] = useState("");
   const [tecnicasOcultas, setTecnicasOcultas] = useState<Set<string>>(new Set());
+  const [personasOcultas, setPersonasOcultas] = useState<Set<string>>(new Set());
+  const [orden, setOrden] = useState<"total" | "alfabetico">("total");
+  const [selectorAbierto, setSelectorAbierto] = useState(false);
 
-  function toggleTecnica(dataKey: string) {
+  const todosLosNombres = useMemo(
+    () => chart.chartData.map((d) => String(d.name)).sort((a, b) => a.localeCompare(b)),
+    [chart.chartData]
+  );
+
+  function toggleTecnica(t: string) {
     setTecnicasOcultas((prev) => {
       const next = new Set(prev);
-      if (next.has(dataKey)) next.delete(dataKey);
-      else next.add(dataKey);
+      if (next.has(t)) next.delete(t);
+      else next.add(t);
       return next;
     });
   }
 
-  const datosFiltrados = chart.chartData.filter((d) =>
-    String(d.name).toLowerCase().includes(filtroNombre.trim().toLowerCase())
-  );
+  function togglePersona(nombre: string) {
+    setPersonasOcultas((prev) => {
+      const next = new Set(prev);
+      if (next.has(nombre)) next.delete(nombre);
+      else next.add(nombre);
+      return next;
+    });
+  }
+
+  const hayFiltrosActivos =
+    filtroTexto.trim() !== "" || tecnicasOcultas.size > 0 || personasOcultas.size > 0;
+
+  function limpiarFiltros() {
+    setFiltroTexto("");
+    setTecnicasOcultas(new Set());
+    setPersonasOcultas(new Set());
+  }
+
+  const datosFiltrados = useMemo(() => {
+    const q = filtroTexto.trim().toLowerCase();
+    const conTotal = chart.chartData.map((d) => ({
+      ...d,
+      __total: chart.tecnicas.reduce(
+        (acc, t) => acc + (tecnicasOcultas.has(t) ? 0 : Number(d[t]) || 0),
+        0
+      ),
+    }));
+    const filtrados = conTotal.filter((d) => {
+      if (personasOcultas.has(String(d.name))) return false;
+      if (q && !String(d.name).toLowerCase().includes(q)) return false;
+      // Si hay técnicas ocultas, las filas que quedaron en cero para las
+      // técnicas visibles no aportan nada a la comparación — se omiten.
+      if (tecnicasOcultas.size > 0 && d.__total === 0) return false;
+      return true;
+    });
+    filtrados.sort((a, b) =>
+      orden === "total"
+        ? (b.__total as number) - (a.__total as number)
+        : String(a.name).localeCompare(String(b.name))
+    );
+    return filtrados;
+  }, [chart.chartData, chart.tecnicas, filtroTexto, tecnicasOcultas, personasOcultas, orden]);
 
   if (chart.chartData.length === 0) return <EmptyRow />;
 
   return (
     <div>
+      {/* ---- Barra de filtros ---- */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <input
-          value={filtroNombre}
-          onChange={(e) => setFiltroNombre(e.target.value)}
-          placeholder="Filtrar por nombre de inspector..."
-          className="w-full max-w-xs rounded-lg border border-ink-200 px-3 py-1.5 text-xs outline-none focus:border-brand-600"
-        />
-        {filtroNombre && (
+        <div className="relative">
+          <input
+            value={filtroTexto}
+            onChange={(e) => setFiltroTexto(e.target.value)}
+            placeholder="Buscar por nombre..."
+            className="w-52 rounded-lg border border-ink-200 py-1.5 pl-3 pr-7 text-xs outline-none focus:border-brand-600"
+          />
+          {filtroTexto && (
+            <button
+              onClick={() => setFiltroTexto("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+              aria-label="Limpiar búsqueda"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        <div className="relative">
           <button
-            onClick={() => setFiltroNombre("")}
-            className="text-xs font-medium text-ink-400 hover:text-ink-700"
+            onClick={() => setSelectorAbierto((v) => !v)}
+            className="flex items-center gap-1.5 rounded-lg border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-600 hover:border-brand-300 hover:text-brand-700"
           >
-            Limpiar
+            Personas
+            {personasOcultas.size > 0 && (
+              <Badge tone="blue">{todosLosNombres.length - personasOcultas.size}</Badge>
+            )}
+            <ChevronDown size={13} />
+          </button>
+          {selectorAbierto && (
+            <div className="absolute left-0 top-full z-20 mt-1 max-h-64 w-56 overflow-y-auto rounded-lg border border-ink-200 bg-white p-2 shadow-lg">
+              <div className="mb-1.5 flex items-center justify-between px-1">
+                <button
+                  onClick={() => setPersonasOcultas(new Set())}
+                  className="text-[11px] font-medium text-brand-600 hover:underline"
+                >
+                  Marcar todas
+                </button>
+                <button
+                  onClick={() => setPersonasOcultas(new Set(todosLosNombres))}
+                  className="text-[11px] font-medium text-ink-400 hover:underline"
+                >
+                  Desmarcar todas
+                </button>
+              </div>
+              {todosLosNombres.map((nombre) => (
+                <label
+                  key={nombre}
+                  className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-ink-700 hover:bg-ink-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!personasOcultas.has(nombre)}
+                    onChange={() => togglePersona(nombre)}
+                    className="h-3.5 w-3.5 accent-brand-600"
+                  />
+                  <span className="truncate">{nombre}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1 rounded-lg border border-ink-200 p-0.5">
+          <button
+            onClick={() => setOrden("total")}
+            title="Ordenar de mayor a menor"
+            className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium ${
+              orden === "total" ? "bg-brand-50 text-brand-700" : "text-ink-500 hover:text-ink-800"
+            }`}
+          >
+            <ArrowDownWideNarrow size={13} /> Total
+          </button>
+          <button
+            onClick={() => setOrden("alfabetico")}
+            title="Ordenar alfabéticamente"
+            className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium ${
+              orden === "alfabetico" ? "bg-brand-50 text-brand-700" : "text-ink-500 hover:text-ink-800"
+            }`}
+          >
+            <ArrowDownAZ size={13} /> A-Z
+          </button>
+        </div>
+
+        {hayFiltrosActivos && (
+          <button
+            onClick={limpiarFiltros}
+            className="flex items-center gap-1 text-[11px] font-medium text-ink-400 hover:text-brand-600"
+          >
+            <RotateCcw size={12} /> Limpiar filtros
           </button>
         )}
-        <span className="text-[11px] text-ink-400">
-          Clic en la leyenda para ocultar/mostrar una técnica
-        </span>
+      </div>
+
+      {/* ---- Chips de técnica: clic para aislar/ocultar (mismas señales
+          que la leyenda del gráfico, pero visibles de entrada) ---- */}
+      <div className="mb-4 flex flex-wrap gap-1.5">
+        {chart.tecnicas.map((t) => {
+          const oculta = tecnicasOcultas.has(t);
+          return (
+            <button
+              key={t}
+              onClick={() => toggleTecnica(t)}
+              className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-opacity"
+              style={{
+                borderColor: colorFn(t),
+                color: oculta ? "#a8a29e" : colorFn(t),
+                opacity: oculta ? 0.5 : 1,
+                backgroundColor: oculta ? "transparent" : `${colorFn(t)}14`,
+              }}
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: oculta ? "#d6d3d1" : colorFn(t) }}
+              />
+              {t.replace(/_/g, " ")}
+            </button>
+          );
+        })}
       </div>
 
       {datosFiltrados.length === 0 ? (
-        <EmptyRow />
+        <p className="py-8 text-center text-sm text-ink-400">
+          Ningún dato coincide con los filtros actuales.
+        </p>
       ) : (
         <div className="overflow-x-auto">
           <div style={{ minWidth: Math.max(560, datosFiltrados.length * 72) }}>
@@ -187,7 +366,7 @@ function InspectorReportsChart({
                     dataKey={t}
                     name={t}
                     stackId="tecnica"
-                    fill={colorParaTecnica(t)}
+                    fill={colorFn(t)}
                     stroke="#fcfcfb"
                     strokeWidth={2}
                     barSize={28}
@@ -211,6 +390,10 @@ function AdminDashboard({ data }: { data: RealDashboardData }) {
   const supervisorChart = buildGroupedBarData(data.serviciosPorSupervisor ?? {});
   const inspectorChart = buildGroupedBarData(data.reportesPorInspector ?? {});
 
+  const certsOrdenados = [...data.certificadosPorVencer].sort(
+    (a, b) => diasParaVencer(a.fechaVencimiento) - diasParaVencer(b.fechaVencimiento)
+  );
+
   return (
     <div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -220,10 +403,14 @@ function AdminDashboard({ data }: { data: RealDashboardData }) {
         <StatCard icon={FileCheck2} label="Reportes generados" value={`${totalGenerados} / ${totalReportes}`} tone="green" />
       </div>
 
-      {/* ---- El gráfico más importante: ancho completo, arriba de todo lo demás ---- */}
-      <div className="mt-8">
-        <Panel title="Reportes generados por inspector">
-          <InspectorReportsChart chart={inspectorChart} />
+      {/* ---- Los dos gráficos más importantes: ancho completo ---- */}
+      <div className="mt-8 space-y-6">
+        <Panel title="Reportes generados por inspector" subtitle="Quién generó qué, y con qué técnica">
+          <GroupedBarChart chart={inspectorChart} />
+        </Panel>
+
+        <Panel title="Servicios abiertos por supervisor" subtitle="Carga de trabajo solicitada, por técnica">
+          <GroupedBarChart chart={supervisorChart} />
         </Panel>
       </div>
 
@@ -233,14 +420,27 @@ function AdminDashboard({ data }: { data: RealDashboardData }) {
             <EmptyRow />
           ) : (
             Object.entries(data.otsPorEstado).map(([estado, count]) => (
-              <BarRow key={estado} label={estado} value={count} max={data.otsTotal || 1} />
+              <BarRow
+                key={estado}
+                label={estado}
+                value={count}
+                max={data.otsTotal || 1}
+                color={colorParaEstado(estado)}
+              />
             ))
           )}
         </Panel>
 
-        <Panel title="Reportes por técnica (generados / total)">
+        <Panel title="Reportes por técnica" subtitle="Generados / total">
           {Object.entries(data.reportesPorTipo).map(([tipo, r]) => (
-            <BarRow key={tipo} label={tipo} value={r.generados} max={r.total || 1} suffix={`${r.generados}/${r.total}`} />
+            <BarRow
+              key={tipo}
+              label={tipo}
+              value={r.generados}
+              max={r.total || 1}
+              suffix={`${r.generados}/${r.total}`}
+              color={colorParaTecnica(tipo)}
+            />
           ))}
         </Panel>
 
@@ -249,74 +449,64 @@ function AdminDashboard({ data }: { data: RealDashboardData }) {
             <EmptyRow />
           ) : (
             Object.entries(data.serviciosPorTecnica).map(([tecnica, count]) => (
-              <BarRow key={tecnica} label={tecnica} value={count} max={data.serviciosTotal || 1} />
+              <BarRow
+                key={tecnica}
+                label={tecnica}
+                value={count}
+                max={data.serviciosTotal || 1}
+                color={colorParaTecnica(tecnica)}
+              />
             ))
           )}
         </Panel>
 
-        <Panel title={`Certificados por vencer (60 días) — ${data.certificadosPorVencer.length}`}>
-          {data.certificadosPorVencer.length === 0 ? (
+        <Panel title="Certificados por vencer" subtitle={`Próximos 60 días — ${data.certificadosPorVencer.length}`}>
+          {certsOrdenados.length === 0 ? (
             <p className="text-sm text-ink-400">Ningún certificado vence pronto.</p>
           ) : (
             <div className="space-y-2">
-              {data.certificadosPorVencer.map((c, i) => (
-                <div key={i} className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-xs">
-                  <div>
-                    <p className="font-medium text-amber-800">{c.usuario} · {c.tecnica}</p>
-                    <p className="text-amber-600">{c.nombreCertificado}</p>
+              {certsOrdenados.map((c, i) => {
+                const dias = diasParaVencer(c.fechaVencimiento);
+                const critico = dias <= 15;
+                return (
+                  <div
+                    key={i}
+                    className={`flex items-center justify-between rounded-lg px-3 py-2 text-xs ${
+                      critico ? "bg-brand-50" : "bg-amber-50"
+                    }`}
+                  >
+                    <div>
+                      <p className={`font-medium ${critico ? "text-brand-800" : "text-amber-800"}`}>
+                        {c.usuario} · {c.tecnica}
+                      </p>
+                      <p className={critico ? "text-brand-600" : "text-amber-600"}>{c.nombreCertificado}</p>
+                    </div>
+                    <div className="text-right">
+                      <Badge tone={critico ? "red" : "yellow"}>{c.fechaVencimiento}</Badge>
+                      {Number.isFinite(dias) && (
+                        <p className={`mt-0.5 text-[10px] ${critico ? "text-brand-500" : "text-amber-500"}`}>
+                          {dias <= 0 ? "vencido" : `en ${dias} día${dias === 1 ? "" : "s"}`}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <Badge tone="yellow">{c.fechaVencimiento}</Badge>
-                </div>
-              ))}
+                );
+              })}
             </div>
-          )}
-        </Panel>
-      </div>
-
-      {/* ---- Servicios abiertos por supervisor (segundo gráfico de barras) ---- */}
-      <div className="mt-6">
-        <Panel title="Servicios abiertos por supervisor">
-          {supervisorChart.chartData.length === 0 ? (
-            <EmptyRow />
-          ) : (
-            <ResponsiveContainer width="100%" height={Math.max(240, supervisorChart.chartData.length * 42)}>
-              <BarChart
-                data={supervisorChart.chartData}
-                layout="vertical"
-                margin={{ top: 4, right: 20, left: 4, bottom: 4 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  width={160}
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={(v: string) => v.length > 24 ? v.slice(0, 22) + "…" : v}
-                />
-                <Tooltip
-                  contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }}
-                />
-                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                {supervisorChart.tecnicas.map((t) => (
-                  <Bar
-                    key={t}
-                    dataKey={t}
-                    name={t}
-                    stackId="tecnica"
-                    fill={colorParaTecnica(t)}
-                    stroke="#fcfcfb"
-                    strokeWidth={2}
-                    barSize={18}
-                  />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
           )}
         </Panel>
       </div>
     </div>
   );
+}
+
+function diasParaVencer(fechaVencimiento: string): number {
+  const fecha = new Date(fechaVencimiento);
+  if (Number.isNaN(fecha.getTime())) return Infinity;
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  fecha.setHours(0, 0, 0, 0);
+  return Math.round((fecha.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 // ---- SUPERVISOR: sus propias OTs y servicios ----
@@ -417,10 +607,21 @@ function InspectorDashboard({ data }: { data: RealDashboardData }) {
   );
 }
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="rounded-xl border border-ink-200 bg-white p-5">
-      <h2 className="mb-4 text-sm font-bold text-ink-800">{title}</h2>
+    <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
+      <div className="mb-4">
+        <h2 className="text-sm font-bold text-ink-800">{title}</h2>
+        {subtitle && <p className="text-[11px] text-ink-400">{subtitle}</p>}
+      </div>
       <div className="space-y-3">{children}</div>
     </div>
   );
@@ -449,7 +650,7 @@ function StatCard({
   }[tone];
 
   return (
-    <div className="rounded-xl border border-ink-200 bg-white p-5">
+    <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
       <div className={`mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg ${toneClasses}`}>
         <Icon size={18} />
       </div>
@@ -464,11 +665,13 @@ function BarRow({
   value,
   max,
   suffix,
+  color,
 }: {
   label: string;
   value: number;
   max: number;
   suffix?: string;
+  color?: string;
 }) {
   const pct = Math.round((value / max) * 100);
   return (
@@ -478,7 +681,10 @@ function BarRow({
         <span>{suffix ?? value}</span>
       </div>
       <div className="h-2 rounded-full bg-ink-100">
-        <div className="h-2 rounded-full bg-brand-600" style={{ width: `${pct}%` }} />
+        <div
+          className="h-2 rounded-full transition-all"
+          style={{ width: `${pct}%`, backgroundColor: color || "#dc2626" }}
+        />
       </div>
     </div>
   );
