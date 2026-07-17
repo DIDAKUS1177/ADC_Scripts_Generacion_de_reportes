@@ -8,6 +8,7 @@ import base64
 import io
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import httpx
 from PIL import Image as PILImage, ImageChops
@@ -54,7 +55,14 @@ def drive_url_a_descarga(url: str) -> str | None:
     return url if url.startswith("http") else None
 
 
-def descargar_imagen(url: str) -> bytes | None:
+def descargar_imagen(url: str, client: httpx.Client | None = None) -> bytes | None:
+    """`client` opcional: si se pasa un `httpx.Client` ya abierto (ver
+    `precargar_fotos`), reutiliza sus conexiones (keep-alive) en vez de
+    abrir una TCP+TLS nueva por cada foto — con 2000 fotos al mismo host
+    (AppSheet), ese handshake repetido era buena parte del tiempo perdido
+    incluso ya paralelizando las descargas (reportado por el usuario
+    2026-07-16: con 16 hilos en paralelo pero sin reuso de conexión, la
+    velocidad solo mejoraba ~2x en vez de acercarse a 16x)."""
     if not url:
         return None
     url = url.strip()
@@ -70,12 +78,51 @@ def descargar_imagen(url: str) -> bytes | None:
     if not final_url:
         return None
     try:
-        resp = httpx.get(final_url, timeout=15, follow_redirects=True)
+        getter = client.get if client is not None else httpx.get
+        resp = getter(final_url, timeout=15, follow_redirects=True)
         if resp.status_code == 200 and resp.content:
             return resp.content
     except Exception:
         logger.warning("No se pudo descargar imagen: %s", url)
     return None
+
+
+def precargar_fotos(urls: list[str], progreso=None, max_workers: int = 24) -> dict[str, bytes | None]:
+    """Descarga muchas fotos EN PARALELO (con un `httpx.Client` compartido
+    para reusar conexiones, ver `descargar_imagen`) y devuelve
+    {url: bytes|None} para consultar en vez de llamar `descargar_imagen`
+    una por una durante el armado del .xlsx — pedido del usuario
+    2026-07-16: un reporte de 570 con 2000 fotos tardaba demasiado porque
+    cada descarga (red a AppSheet, ~1-2s) se esperaba de forma secuencial
+    antes de pasar a la siguiente. openpyxl no es thread-safe (no se puede
+    insertar en el workbook desde varios hilos), así que la inserción sigue
+    siendo secuencial — pero la parte lenta, la RED, sí se paraleliza aquí.
+    `progreso(pct, etapa)` se llama según van terminando las descargas
+    (0-100 dentro de esta fase).
+
+    URLs vacías/repetidas se filtran antes de lanzar hilos (no vale la pena
+    un hilo por nada, y una foto repetida no debe descargarse dos veces)."""
+    urls_unicas = list({u.strip() for u in urls if u and u.strip()})
+    resultado: dict[str, bytes | None] = {}
+    if not urls_unicas:
+        return resultado
+
+    completadas = 0
+    total = len(urls_unicas)
+    limites = httpx.Limits(max_connections=max_workers * 2, max_keepalive_connections=max_workers)
+    with httpx.Client(limits=limites) as client, ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futuros = {executor.submit(descargar_imagen, u, client): u for u in urls_unicas}
+        for futuro in as_completed(futuros):
+            url = futuros[futuro]
+            try:
+                resultado[url] = futuro.result()
+            except Exception:
+                logger.warning("Error descargando foto en paralelo: %s", url)
+                resultado[url] = None
+            completadas += 1
+            if progreso:
+                progreso(round(completadas / total * 100), f"Descargando fotos ({completadas}/{total})")
+    return resultado
 
 
 def _recortar_a_contenido(image_bytes: bytes) -> bytes:
@@ -106,6 +153,39 @@ def _recortar_a_contenido(image_bytes: bytes) -> bytes:
         return buf.getvalue()
     except Exception:
         logger.warning("No se pudo recortar la imagen al contenido, se usa tal cual")
+        return image_bytes
+
+
+def _comprimir_imagen(image_bytes: bytes, img_pil: "PILImage.Image", ancho_final: int, alto_final: int) -> bytes:
+    """Reescala y reencoda a JPEG antes de incrustar — las fotos de celular
+    vienen en resolución completa (3000x4000px, varios MB) pero se muestran
+    a ~200x150px en la celda; sin comprimir, un reporte de 2000 fotos podía
+    pesar varios GB y tardar minutos solo en guardarse (reportado por el
+    usuario 2026-07-16). Se deja el DOBLE del tamaño mostrado (no 1:1) para
+    que se vea nítida si alguien hace zoom o imprime. Solo para fotos de
+    inspección — NO se usa en firmas (ver `insertar_imagen_centrada`), que
+    ya son pequeñas tras `_recortar_a_contenido` y donde perder nitidez del
+    trazo importa más que el ahorro de tamaño."""
+    try:
+        limite_w = max(ancho_final * 2, 60)
+        limite_h = max(alto_final * 2, 60)
+        img = img_pil
+        if img.width > limite_w or img.height > limite_h:
+            img = img.copy()
+            img.thumbnail((limite_w, limite_h), PILImage.LANCZOS)
+        if img.mode in ("RGBA", "LA", "P"):
+            rgba = img.convert("RGBA")
+            fondo = PILImage.new("RGB", rgba.size, (255, 255, 255))
+            fondo.paste(rgba, mask=rgba.split()[-1])
+            img = fondo
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=82, optimize=True)
+        comprimida = buf.getvalue()
+        return comprimida if len(comprimida) < len(image_bytes) else image_bytes
+    except Exception:
+        logger.warning("No se pudo comprimir la imagen, se usa tal cual")
         return image_bytes
 
 
@@ -171,18 +251,28 @@ def insertar_imagen_centrada(ws, image_bytes: bytes, celda_ancla: str, recortar_
     if recortar_contenido:
         image_bytes = _recortar_a_contenido(image_bytes)
     try:
-        img = XLImage(io.BytesIO(image_bytes))
+        img_pil = PILImage.open(io.BytesIO(image_bytes))
+        img_pil.load()
     except Exception:
         logger.warning("Imagen inválida, se omite")
         return
 
     margen = 4
     escala = min(
-        max(ancho_area - margen, 20) / img.width,
-        max(alto_area - margen, 20) / img.height,
+        max(ancho_area - margen, 20) / img_pil.width,
+        max(alto_area - margen, 20) / img_pil.height,
     )
-    ancho_final = round(img.width * escala)
-    alto_final = round(img.height * escala)
+    ancho_final = round(img_pil.width * escala)
+    alto_final = round(img_pil.height * escala)
+
+    if not recortar_contenido:
+        image_bytes = _comprimir_imagen(image_bytes, img_pil, ancho_final, alto_final)
+
+    try:
+        img = XLImage(io.BytesIO(image_bytes))
+    except Exception:
+        logger.warning("Imagen inválida tras comprimir, se omite")
+        return
     img.width = ancho_final
     img.height = alto_final
 

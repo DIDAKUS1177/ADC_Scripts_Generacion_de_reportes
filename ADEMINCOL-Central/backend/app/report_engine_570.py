@@ -30,6 +30,7 @@ from .image_utils import (
     descargar_imagen,
     insertar_imagen_centrada,
     marcar_celda_sin_imagen,
+    precargar_fotos,
 )
 from .report_utils import valor_tipado
 
@@ -257,12 +258,26 @@ def generar_reporte_570(
     fotos_procesadas = 0
     filas_acumuladas = 0
 
+    # Descargar TODAS las fotos de las 15 secciones EN PARALELO antes de
+    # armar el .xlsx, en vez de una por una durante el loop de secciones —
+    # con reportes de ~2000 fotos, esperar cada descarga en serie (red a
+    # AppSheet, ~1-2s c/u) era el cuello de botella real (reportado por el
+    # usuario 2026-07-16). La inserción en el workbook sigue secuencial
+    # (openpyxl no es thread-safe) pero ya no tiene que esperar red.
+    todas_las_urls = [
+        f.get("url") for fotos_sec in secciones_fotos.values() for f in fotos_sec if f.get("url")
+    ]
+    cache_fotos = precargar_fotos(
+        todas_las_urls,
+        progreso=lambda pct, etapa: _reportar(5 + round(pct * 0.50), etapa),
+    )
+
     for idx_sec, key in enumerate(SECTION_KEYS_ORDEN):
         config = SECTIONS_CONFIG[key]
         registros = secciones_data.get(key, [])
         fotos = secciones_fotos.get(key, [])
 
-        pct_base = 10 + round((idx_sec / len(SECTION_KEYS_ORDEN)) * 80)
+        pct_base = 55 + round((idx_sec / len(SECTION_KEYS_ORDEN)) * 35)
         _reportar(pct_base, f"Sección {idx_sec + 1}/{len(SECTION_KEYS_ORDEN)}: {config['sheet']}")
 
         fila_inicio = config["data_start_row"] + filas_acumuladas
@@ -328,15 +343,15 @@ def generar_reporte_570(
             if desc:
                 ws[f"{col}{f_desc}"] = desc
 
-            img_bytes = descargar_imagen(foto.get("url") or "")
+            img_bytes = cache_fotos.get((foto.get("url") or "").strip())
             if img_bytes:
                 insertar_imagen_centrada(ws, img_bytes, f"{col}{f_foto}")
             else:
                 marcar_celda_sin_imagen(ws, f"{col}{f_foto}")
 
             fotos_procesadas += 1
-            pct_fotos = 10 + round((fotos_procesadas / total_fotos) * 80)
-            _reportar(min(pct_fotos, 90), f"Foto {fotos_procesadas} de {total_fotos}")
+            pct_fotos = 55 + round((fotos_procesadas / total_fotos) * 35)
+            _reportar(min(pct_fotos, 90), f"Insertando foto {fotos_procesadas} de {total_fotos}")
 
     # La firma va DESPUÉS de las 15 secciones — su fila real se corre hacia
     # abajo por cada fila que se haya insertado dinámicamente arriba (mismo

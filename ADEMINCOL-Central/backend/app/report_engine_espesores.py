@@ -29,6 +29,7 @@ from .image_utils import (
     descargar_imagen,
     insertar_imagen_centrada,
     marcar_celda_sin_imagen,
+    precargar_fotos,
 )
 from .report_utils import valor_tipado
 
@@ -325,6 +326,14 @@ def generar_reporte_espesores(
         filas_extra += filas_extra_fotos
 
     total_fotos = len(fotos) or 1
+    # Descargar todas las fotos EN PARALELO antes de insertarlas — mismo fix
+    # de rendimiento que report_engine_570.py (pedido del usuario
+    # 2026-07-16, reportes con muchas fotos tardaban demasiado esperando
+    # cada descarga en serie).
+    cache_fotos = precargar_fotos(
+        [f.get("url") for f in fotos if f.get("url")],
+        progreso=lambda pct, etapa: _reportar(35 + round(pct * 0.05), etapa),
+    )
     # Celdas de foto SIN imagen (menos fotos que espacios en el último bloque
     # de 3, o descarga fallida) quedan marcadas con una diagonal — pedido
     # del usuario 2026-07-16, mismo estilo "sin dato" del diálogo de bordes
@@ -347,8 +356,8 @@ def generar_reporte_espesores(
             ws[f"{col}{f_desc}"] = desc
 
         pct = 40 + round((i / total_fotos) * 45)
-        _reportar(min(pct, 85), f"Foto {i + 1} de {len(fotos)}")
-        img_bytes = descargar_imagen(foto.get("url") or "")
+        _reportar(min(pct, 85), f"Insertando foto {i + 1} de {len(fotos)}")
+        img_bytes = cache_fotos.get((foto.get("url") or "").strip())
         if img_bytes:
             insertar_imagen_centrada(ws, img_bytes, f"{col}{f_foto}")
         else:
